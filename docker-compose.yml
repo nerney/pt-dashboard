@@ -1,0 +1,13 @@
+services:
+  pt-dashboard:
+    build: .
+    ports:
+      - "8008:8008"
+    volumes:
+      - pt-config:/config
+    environment:
+      - CONFIG_DIR=/config
+    restart: unless-stopped
+
+volumes:
+  pt-config:

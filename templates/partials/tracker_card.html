@@ -1,0 +1,80 @@
+{{ define "tracker_card" }}
+<article class="tracker-card">
+  <div class="card-head">
+    <h2 class="tracker-name">{{ .Name }}</h2>
+    {{ if gt .ProwlarrID 0 }}
+      {{ if .Enabled }}
+        <span class="prowlarr-badge prowlarr-on" title="In Prowlarr — enabled">● PROWLARR</span>
+      {{ else }}
+        <span class="prowlarr-badge prowlarr-off" title="In Prowlarr — disabled">○ PROWLARR</span>
+      {{ end }}
+    {{ else }}
+      <span class="prowlarr-badge prowlarr-none" title="Not in Prowlarr">— PROWLARR</span>
+    {{ end }}
+  </div>
+
+  {{ if eq .APIKey "" }}
+    <div class="card-unconfigured">
+      <span class="unconfigured-label">CONFIG REQUIRED</span>
+      <a href="/config" class="unconfigured-link">→ set credentials</a>
+    </div>
+  {{ else if ne .SyncError "" }}
+    <div class="card-error">
+      <span class="error-label">SYNC ERROR</span>
+      <span class="error-msg">{{ .SyncError }}</span>
+    </div>
+    {{ if .LastSync }}
+      <div class="card-lastsynced">last attempt {{ staleAge .LastSync }}</div>
+    {{ end }}
+  {{ else if not .UserStats }}
+    <div class="card-pending">
+      <span class="pending-label">NOT YET SYNCED</span>
+      <span class="pending-hint">press SYNC to load stats</span>
+    </div>
+  {{ else }}
+    <div class="ratio-hero">
+      <span class="ratio-num {{ ratioClass .UserStats.Ratio }}">{{ formatRatio .UserStats.Ratio }}</span>
+      <div class="ratio-meta">
+        <span class="ratio-x">×</span>
+        <span class="ratio-label">RATIO</span>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat">
+        <span class="stat-label">UPLOAD</span>
+        <span class="stat-val">{{ formatBytes .UserStats.Upload }}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">DOWNLOAD</span>
+        <span class="stat-val">{{ formatBytes .UserStats.Download }}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">BUFFER</span>
+        <span class="stat-val {{ if gt .UserStats.Buffer 0 }}val-pos{{ end }}">{{ formatBytes .UserStats.Buffer }}</span>
+      </div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat">
+        <span class="stat-label">BONUS</span>
+        <span class="stat-val">{{ formatBonus .UserStats.Bonus }}</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">SEEDING</span>
+        <span class="stat-val val-pos">{{ .UserStats.Seeding }}↑</span>
+      </div>
+      <div class="stat">
+        <span class="stat-label">LEECHING</span>
+        <span class="stat-val">{{ .UserStats.Leeching }}↓</span>
+      </div>
+    </div>
+
+    <div class="card-foot">
+      {{ if .UserStats.Class }}<span class="user-class">{{ .UserStats.Class }}</span>{{ end }}
+      {{ if .UserStats.Username }}<span class="username">· {{ .UserStats.Username }}</span>{{ end }}
+      {{ if .LastSync }}<span class="last-sync">{{ staleAge .LastSync }}</span>{{ end }}
+    </div>
+  {{ end }}
+</article>
+{{ end }}

@@ -1,0 +1,49 @@
+{{ define "content" }}
+<header class="site-header">
+  <div class="header-brand">
+    <a href="/" class="brand-link">
+      <span class="brand-mark">UNIT3D</span>
+      <span class="brand-sep">—</span>
+      <span class="brand-sub">TRACKER DASHBOARD</span>
+    </a>
+  </div>
+  <nav class="header-nav">
+    <div id="sync-status" class="sync-status{{ if isStale .LastSync }} is-stale{{ end }}">
+      {{ if .LastSync }}
+        {{ if isStale .LastSync }}<span class="stale-mark" aria-label="stale">⚠</span>{{ end }}
+        <span class="sync-age">{{ staleAge .LastSync }}</span>
+      {{ else }}
+        <span class="sync-age muted">—</span>
+      {{ end }}
+    </div>
+    <button class="btn-primary htmx-btn"
+            hx-post="/sync"
+            hx-target="#tracker-grid"
+            hx-swap="innerHTML">
+      <span class="btn-label">SYNC</span>
+      <span class="btn-arrow">→</span>
+    </button>
+    <a href="/config" class="btn-ghost">CONFIG</a>
+  </nav>
+</header>
+
+<div class="page-rule"></div>
+
+<div class="page-bar">
+  <span class="section-label">TRACKERS<span class="section-count"> — {{ len .Trackers }}</span></span>
+  <span class="page-date">{{ .Date }}</span>
+</div>
+
+<div class="grid-rule"></div>
+
+<main id="tracker-grid" class="tracker-grid">
+  {{ range .Trackers }}
+    {{ template "tracker_card" . }}
+  {{ end }}
+  {{ if not .Trackers }}
+  <div class="empty-state">
+    <p>No trackers configured. <a href="/config">Add trackers →</a></p>
+  </div>
+  {{ end }}
+</main>
+{{ end }}
