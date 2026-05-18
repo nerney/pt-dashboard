@@ -92,13 +92,13 @@ func (h *Handler) importSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-	urlMap, typeMap, err := h.catalogMaps()
+	urlMap, typeMap, nameToDefName, err := h.catalogMaps()
 	if err != nil {
 		flash(w, r, pathImport, "", "Catalog unavailable: "+err.Error())
 		return
 	}
 
-	result := h.runImport(client, &cfg, idStrs, urlMap, typeMap)
+	result := h.runImport(client, &cfg, idStrs, urlMap, typeMap, nameToDefName)
 
 	if len(result.imported) > 0 {
 		if err := h.store.Save(&cfg); err != nil {
@@ -120,19 +120,24 @@ type importOutcome struct {
 	unvalidated []string
 }
 
-// catalogMaps loads the catalog and builds two lookup tables used by the
-// import flow: URL → definition name, and definition name → tracker type ID.
-func (h *Handler) catalogMaps() (urlMap map[string]string, typeMap map[string]string, err error) {
+// catalogMaps loads the catalog and builds lookup tables used by the import
+// flow: URL → definition name, definition name → tracker type ID, and
+// lowercase definition name → canonical definition name (for name-based
+// fallback when a Prowlarr indexer has no baseurl field).
+func (h *Handler) catalogMaps() (urlMap, typeMap, nameToDefName map[string]string, err error) {
 	allDefs, err := h.syncer.Catalog()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	urlMap = buildURLMap(allDefs)
 	typeMap = make(map[string]string, len(allDefs))
+	nameToDefName = make(map[string]string, len(allDefs))
 	for _, d := range allDefs {
-		typeMap[strings.ToLower(d.Name)] = d.TypeID
+		lower := strings.ToLower(d.Name)
+		typeMap[lower] = d.TypeID
+		nameToDefName[lower] = d.Name
 	}
-	return urlMap, typeMap, nil
+	return urlMap, typeMap, nameToDefName, nil
 }
 
 // runImport iterates the selected Prowlarr IDs and appends the
@@ -144,6 +149,7 @@ func (h *Handler) runImport(
 	idStrs []string,
 	urlMap map[string]string,
 	typeMap map[string]string,
+	nameToDefName map[string]string,
 ) importOutcome {
 	out := importOutcome{}
 	already := managedSet(cfg.Trackers)
@@ -160,7 +166,7 @@ func (h *Handler) runImport(
 			continue
 		}
 
-		entry, skipReason := h.buildImportEntry(idx, urlMap, typeMap, already)
+		entry, skipReason := h.buildImportEntry(idx, urlMap, typeMap, nameToDefName, already)
 		if skipReason != "" {
 			if skipReason != skipAlreadyManaged {
 				// "already managed" is a no-op, not a failure to surface.
@@ -211,10 +217,16 @@ func (h *Handler) buildImportEntry(
 	idx *prowlarr.Indexer,
 	urlMap map[string]string,
 	typeMap map[string]string,
+	nameToDefName map[string]string,
 	already map[string]bool,
 ) (*config.TrackerEntry, string) {
 	idxURL, key := prowlarr.ExtractCreds(idx.Fields)
 	schemaName := urlMap[prowlarr.NormalizeURL(idxURL)]
+	if schemaName == "" {
+		// Some definitions have no user-configurable URL field — the site URL
+		// is hardcoded in the def's links. Fall back to matching by name.
+		schemaName = nameToDefName[strings.ToLower(idx.Name)]
+	}
 	if schemaName == "" {
 		return nil, skipURLNotCatalog
 	}
