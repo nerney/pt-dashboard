@@ -43,12 +43,12 @@
 
   <section class="config-section">
     <h2 class="config-section-title">
-      AVAILABLE TO IMPORT<span class="muted"> — {{ len .Importable }}</span>
+      LINK TO AUTOBRR<span class="muted"> — {{ len .Importable }}</span>
     </h2>
     <div class="section-rule"></div>
 
     {{ if .Importable }}
-    <p class="config-hint">Select Autobrr indexers to import as PTV trackers. The Autobrr indexer ID is linked to the new tracker entry so toggle/remove work end-to-end.</p>
+    <p class="config-hint">Select managed trackers to link to their existing Autobrr indexers. Linking enables the IRC connection status indicator on each card.</p>
 
     <form method="POST" action="/config/autobrr/import" class="import-form" id="import-form">
       <label class="import-row import-row-check import-row-all">
@@ -59,15 +59,15 @@
       <div class="import-list">
         {{ range .Importable }}
         <label class="import-row import-row-check">
-          <input type="checkbox" name="autobrr_id" value="{{ .AutobrrID }}" class="import-check import-check-row">
-          <span class="tracker-select-name">{{ .Name }}</span>
-          <span class="tracker-select-url">{{ .BaseURL }}</span>
+          <input type="checkbox" name="definition_name" value="{{ .DefinitionName }}" class="import-check import-check-row">
+          <span class="tracker-select-name">{{ .TrackerName }}</span>
+          <span class="tracker-select-url">{{ .TrackerURL }}</span>
           {{ if .Enabled }}<span class="key-pill key-on">● ENABLED</span>{{ else }}<span class="key-pill key-off">○ DISABLED</span>{{ end }}
         </label>
         {{ end }}
       </div>
       <div class="import-submit-row">
-        <button type="submit" class="btn-primary">IMPORT SELECTED →</button>
+        <button type="submit" class="btn-primary">LINK SELECTED →</button>
       </div>
     </form>
     <script>
@@ -90,7 +90,7 @@
     })();
     </script>
     {{ else }}
-    <p class="config-empty">No additional indexers in Autobrr match the PTV catalog.</p>
+    <p class="config-empty">All managed trackers are already linked to Autobrr, or none have a matching Autobrr indexer.</p>
     {{ end }}
   </section>
   {{ end }}

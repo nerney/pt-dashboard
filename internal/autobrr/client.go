@@ -168,6 +168,23 @@ func (c *Client) GetSchemas() ([]IndexerSchema, error) {
 	return out, nil
 }
 
+// IndexerByURL returns the first existing Autobrr indexer whose base_url
+// matches the supplied tracker URL (normalized). Returns nil, nil when no
+// match is found — so the caller can distinguish "error" from "not found".
+func (c *Client) IndexerByURL(trackerURL string) (*Indexer, error) {
+	idxs, err := c.GetIndexers()
+	if err != nil {
+		return nil, err
+	}
+	want := NormalizeURL(trackerURL)
+	for i, idx := range idxs {
+		if NormalizeURL(idx.BaseURL) == want {
+			return &idxs[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // SchemaForURL returns the first schema whose URLs include the supplied
 // tracker URL (case-insensitive, trailing slash agnostic).
 func (c *Client) SchemaForURL(trackerURL string) (*IndexerSchema, error) {
