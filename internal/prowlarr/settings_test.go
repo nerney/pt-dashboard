@@ -161,18 +161,24 @@ func TestWithCoreCredentialsOverlaysURLAndKey(t *testing.T) {
 func TestDiffSettingsIgnoresProwlarrReadbackOnlyFields(t *testing.T) {
 	schema := IndexerSchema{Fields: []SchemaField{
 		{Name: "baseUrl"},
+		{Name: "info_activity", Value: "PT24H"},
+		{Name: "info_flaresolverr", Value: "Unavailable"},
 		{Name: "info_key", Value: "masked"},
 		{Name: "definitionFile", Value: "unit3d.yml"},
 	}}
 	desired := map[string]string{
-		"baseUrl":        "https://tracker.test/",
-		"info_key":       "real-secret",
-		"definitionFile": "unit3d.yml",
+		"baseUrl":           "https://tracker.test/",
+		"info_activity":     "PT6H",
+		"info_flaresolverr": "Required",
+		"info_key":          "real-secret",
+		"definitionFile":    "unit3d.yml",
 	}
 	actual := map[string]string{
-		"baseUrl":        "https://tracker.test",
-		"info_key":       "",
-		"definitionFile": "prowlarr-readback.yml",
+		"baseUrl":           "https://tracker.test",
+		"info_activity":     "",
+		"info_flaresolverr": "",
+		"info_key":          "",
+		"definitionFile":    "prowlarr-readback.yml",
 	}
 
 	if diff := DiffSettings(schema, desired, actual); len(diff) != 0 {

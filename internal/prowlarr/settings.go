@@ -316,7 +316,7 @@ func DiffSettings(schema IndexerSchema, left, right map[string]string) []string 
 }
 
 func ignoreForDrift(f SchemaField) bool {
-	return IsDefinitionFileField(f) || IsSecretField(f)
+	return IsDefinitionFileField(f) || IsSecretField(f) || IsInfoField(f)
 }
 
 func comparableSettingValue(f SchemaField, value string, ok bool) string {
