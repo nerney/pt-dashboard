@@ -136,7 +136,8 @@ func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 //  1. Rate-limit check (5 failures/IP/5min → 429).
 //  2. Reject second logins with a bare 403 (no body, no info).
 //  3. Store.Unlock — decrypt-as-verification; auth-tag failure = bad password.
-//  4. Begin a new session, set cookie, redirect home.
+//  4. Verify the submitted username against the decrypted config.
+//  5. Begin a new session, set cookie, redirect home.
 //
 // On any failure between unlock-success and session-create we MUST
 // Lock the store again to wipe the derived key from memory.
@@ -162,16 +163,29 @@ func (h *Handler) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	username := strings.TrimSpace(r.FormValue("username"))
 	password := r.FormValue("password")
+	if username == "" || password == "" {
+		h.limiter.RecordFailure(ip)
+		h.render(w, "login", loginPageData{Error: "Incorrect username or password."})
+		return
+	}
 	if err := h.store.Unlock(password); err != nil {
 		h.limiter.RecordFailure(ip)
 		if errors.Is(err, config.ErrBadPassword) {
 			h.log.Err("AUTH", "Bad password from "+ip)
-			h.render(w, "login", loginPageData{Error: "Incorrect password."})
+			h.render(w, "login", loginPageData{Error: "Incorrect username or password."})
 			return
 		}
 		h.log.Err("AUTH", "Unlock failed: "+err.Error())
 		h.render(w, "login", loginPageData{Error: "Login failed."})
+		return
+	}
+	if h.store.Get().Username != username {
+		h.store.Lock()
+		h.limiter.RecordFailure(ip)
+		h.log.Err("AUTH", "Bad username from "+ip)
+		h.render(w, "login", loginPageData{Error: "Incorrect username or password."})
 		return
 	}
 	h.limiter.RecordSuccess(ip)
