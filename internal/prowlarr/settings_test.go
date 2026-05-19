@@ -1,0 +1,79 @@
+package prowlarr
+
+import "testing"
+
+func TestMergeSettingsPreservesBlankSecret(t *testing.T) {
+	schema := IndexerSchema{Fields: []SchemaField{
+		{Name: "apiKey", Label: "API Key", Required: true},
+		{Name: "baseUrl", Label: "URL", Value: "https://example.test"},
+	}}
+	existing := map[string]string{
+		"apiKey": "saved-secret",
+		"old":    "dropped",
+	}
+	submitted := map[string]string{
+		"apiKey":  "",
+		"baseUrl": "https://tracker.test",
+		"other":   "ignored",
+	}
+
+	got := MergeSettings(schema, existing, submitted)
+	if got["apiKey"] != "saved-secret" {
+		t.Fatalf("apiKey = %q, want preserved secret", got["apiKey"])
+	}
+	if got["baseUrl"] != "https://tracker.test" {
+		t.Fatalf("baseUrl = %q", got["baseUrl"])
+	}
+	if _, ok := got["old"]; ok {
+		t.Fatal("stale setting was not dropped")
+	}
+	if _, ok := got["other"]; ok {
+		t.Fatal("unknown submitted setting was not ignored")
+	}
+}
+
+func TestRenderFieldsDoesNotExposeSecrets(t *testing.T) {
+	schema := IndexerSchema{Fields: []SchemaField{
+		{Name: "apiKey", Label: "API Key", Required: true},
+		{Name: "baseUrl", Label: "URL"},
+	}}
+	settings := map[string]string{
+		"apiKey":  "saved-secret",
+		"baseUrl": "https://tracker.test",
+	}
+
+	fields := RenderFields(schema, settings)
+	if len(fields) != 2 {
+		t.Fatalf("len(fields) = %d", len(fields))
+	}
+	if !fields[0].Secret || fields[0].Value != "" || !fields[0].HasValue {
+		t.Fatalf("secret field rendered incorrectly: %+v", fields[0])
+	}
+	if fields[1].Secret || fields[1].Value != "https://tracker.test" {
+		t.Fatalf("non-secret field rendered incorrectly: %+v", fields[1])
+	}
+}
+
+func TestWithCoreCredentialsOverlaysURLAndKey(t *testing.T) {
+	schema := IndexerSchema{Fields: []SchemaField{
+		{Name: "baseUrl"},
+		{Name: "apiKey", Required: true},
+		{Name: "minimumSeeders", Value: float64(1)},
+	}}
+	settings := map[string]string{
+		"baseUrl":        "https://old.test",
+		"apiKey":         "old-key",
+		"minimumSeeders": "3",
+	}
+
+	got := WithCoreCredentials(schema, settings, "https://tracker.test/", "core-key")
+	if got["baseUrl"] != "https://tracker.test" {
+		t.Fatalf("baseUrl = %q", got["baseUrl"])
+	}
+	if got["apiKey"] != "core-key" {
+		t.Fatalf("apiKey = %q", got["apiKey"])
+	}
+	if got["minimumSeeders"] != "3" {
+		t.Fatalf("minimumSeeders = %q", got["minimumSeeders"])
+	}
+}

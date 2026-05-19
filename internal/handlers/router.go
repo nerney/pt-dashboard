@@ -144,6 +144,8 @@ func NewRouter(store *config.Store, syncer *defs.Syncer, autobrrSyncer *autobrrd
 		r.Post("/config/tracker/{idx}/prowlarr/add", h.configTrackerProwlarrAdd)
 		r.Post("/config/tracker/{idx}/prowlarr/toggle", h.configTrackerProwlarrToggle)
 		r.Post("/config/tracker/{idx}/prowlarr/remove", h.configTrackerProwlarrRemove)
+		r.Get("/config/tracker/{idx}/prowlarr", h.configTrackerProwlarrPage)
+		r.Post("/config/tracker/{idx}/prowlarr", h.configTrackerProwlarrPost)
 		r.Post("/config/tracker/{idx}/autobrr/add", h.configTrackerAutobrrAdd)
 		r.Post("/config/tracker/{idx}/autobrr/toggle", h.configTrackerAutobrrToggle)
 		r.Post("/config/tracker/{idx}/autobrr/remove", h.configTrackerAutobrrRemove)
@@ -372,19 +374,20 @@ func (h *Handler) parseTemplates() map[string]*template.Template {
 	}
 
 	return map[string]*template.Template{
-		"dashboard":       parse("layout", layout, "templates/dashboard.html", card),
-		"setup":           parse("layout", layout, "templates/setup.html"),
-		"login":           parse("layout", layout, "templates/login.html"),
-		"config_landing":  parse("layout", layout, "templates/config_landing.html"),
-		"config_trackers": parse("layout", layout, configNav, "templates/config_trackers.html"),
-		"config_prowlarr": parse("layout", layout, configNav, prowlarrNav, "templates/config_prowlarr.html"),
-		"config_autobrr":  parse("layout", layout, configNav, autobrrNav, "templates/config_autobrr.html"),
-		"config_network":  parse("layout", layout, configNav, "templates/config_network.html"),
-		"import":          parse("layout", layout, configNav, prowlarrNav, "templates/import.html"),
-		"autobrr_import":  parse("layout", layout, configNav, autobrrNav, "templates/autobrr_import.html"),
-		"prowlarr_sync":   parse("layout", layout, configNav, prowlarrNav, "templates/prowlarr_sync.html"),
-		"tracker_cards":   parse("tracker_cards", "templates/partials/tracker_cards.html", card),
-		"tracker_card":    parse("tracker_card", card),
+		"dashboard":        parse("layout", layout, "templates/dashboard.html", card),
+		"setup":            parse("layout", layout, "templates/setup.html"),
+		"login":            parse("layout", layout, "templates/login.html"),
+		"config_landing":   parse("layout", layout, "templates/config_landing.html"),
+		"config_trackers":  parse("layout", layout, configNav, "templates/config_trackers.html"),
+		"config_prowlarr":  parse("layout", layout, configNav, prowlarrNav, "templates/config_prowlarr.html"),
+		"config_autobrr":   parse("layout", layout, configNav, autobrrNav, "templates/config_autobrr.html"),
+		"config_network":   parse("layout", layout, configNav, "templates/config_network.html"),
+		"import":           parse("layout", layout, configNav, prowlarrNav, "templates/import.html"),
+		"autobrr_import":   parse("layout", layout, configNav, autobrrNav, "templates/autobrr_import.html"),
+		"prowlarr_sync":    parse("layout", layout, configNav, prowlarrNav, "templates/prowlarr_sync.html"),
+		"tracker_prowlarr": parse("layout", layout, configNav, prowlarrNav, "templates/tracker_prowlarr.html"),
+		"tracker_cards":    parse("tracker_cards", "templates/partials/tracker_cards.html", card),
+		"tracker_card":     parse("tracker_card", card),
 	}
 }
 

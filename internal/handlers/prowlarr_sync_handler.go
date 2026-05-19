@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nerney/ptv/internal/config"
 	"github.com/nerney/ptv/internal/prowlarr"
@@ -36,6 +37,8 @@ type prowlarrSyncRow struct {
 	State          syncState
 	ProwlarrURL    string // Prowlarr's current value (relevant on drift)
 	ProwlarrHasKey bool   // whether Prowlarr has an API key set
+	DiffFields     []string
+	SchemaError    string
 }
 
 type prowlarrSyncData struct {
@@ -80,7 +83,7 @@ func (h *Handler) prowlarrSyncPage(w http.ResponseWriter, r *http.Request) {
 
 	byID := indexersByID(prowlarrIndexers)
 	for i, t := range cfg.Trackers {
-		row := classifyTracker(i, t, byID)
+		row := h.classifyTracker(i, t, byID)
 		switch row.State {
 		case syncNew:
 			data.New = append(data.New, row)
@@ -109,7 +112,7 @@ func indexersByID(idxs []prowlarr.Indexer) map[int]prowlarr.Indexer {
 // classifyTracker decides which sync bucket a tracker belongs to. A
 // stored ProwlarrID that no longer exists in Prowlarr is treated as
 // "new" — the next push will recreate it and overwrite the stale ID.
-func classifyTracker(i int, t *config.TrackerEntry, byID map[int]prowlarr.Indexer) prowlarrSyncRow {
+func (h *Handler) classifyTracker(i int, t *config.TrackerEntry, byID map[int]prowlarr.Indexer) prowlarrSyncRow {
 	row := prowlarrSyncRow{
 		TrackerIdx: i,
 		Name:       t.Name,
@@ -131,8 +134,17 @@ func classifyTracker(i int, t *config.TrackerEntry, byID map[int]prowlarr.Indexe
 	}
 	row.ProwlarrURL = pURL
 	row.ProwlarrHasKey = pKey != ""
-	if prowlarr.NormalizeURL(pURL) != prowlarr.NormalizeURL(t.TrackerURL) || pKey != t.APIKey {
+	schema, err := h.prowlarrSchemaByName(t.DefinitionName)
+	if err != nil {
 		row.State = syncDrift
+		row.SchemaError = err.Error()
+		return row
+	}
+	desired := prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings, t.TrackerURL, t.APIKey)
+	actual := prowlarr.SettingsFromFields(*schema, idx.Fields)
+	if !prowlarr.SettingsEqual(*schema, desired, actual) {
+		row.State = syncDrift
+		row.DiffFields = prowlarr.DiffSettings(*schema, desired, actual)
 	} else {
 		row.State = syncSynced
 	}
@@ -229,32 +241,42 @@ func (h *Handler) pushTrackerToProwlarr(
 	byID map[int]prowlarr.Indexer,
 ) (action string, err error) {
 	t := cfg.Trackers[i]
+	schema, sErr := h.prowlarrSchemaByName(t.DefinitionName)
+	if sErr != nil {
+		return "pushed", fmt.Errorf("schema lookup: %w", sErr)
+	}
+	settings := prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings, t.TrackerURL, t.APIKey)
+	fields := prowlarr.FieldsForPayload(*schema, settings)
 
 	// Update path: dashboard has a Prowlarr ID AND Prowlarr still has it.
 	if t.ProwlarrID != 0 {
 		if existing, ok := byID[t.ProwlarrID]; ok {
-			updated, uErr := client.UpdateIndexer(existing, t.TrackerURL, t.APIKey)
+			updated, uErr := client.UpdateIndexerWithFields(existing, fields)
 			if uErr != nil {
 				return "updated", uErr
 			}
 			cfg.Trackers[i].Enabled = updated.Enable
+			returned := prowlarr.SettingsFromFields(*schema, updated.Fields)
+			cfg.Trackers[i].ProwlarrSettings = prowlarr.MergeSettings(*schema, settings, returned)
+			now := time.Now()
+			cfg.Trackers[i].ProwlarrLastSync = &now
+			cfg.Trackers[i].ProwlarrSyncError = ""
 			return "updated", nil
 		}
 		// Stale ID → fall through to create.
 	}
 
-	// Create path. Look up the schema (so AddIndexer can populate
-	// implementation-specific defaults) and post the new indexer.
-	schema, sErr := h.prowlarrSchemaByName(t.DefinitionName)
-	if sErr != nil {
-		return "created", fmt.Errorf("schema lookup: %w", sErr)
-	}
-	added, aErr := client.AddIndexer(*schema, t.TrackerURL, t.APIKey)
+	added, aErr := client.AddIndexerWithFields(*schema, fields)
 	if aErr != nil {
 		return "created", aErr
 	}
 	cfg.Trackers[i].ProwlarrID = added.ID
 	cfg.Trackers[i].Enabled = added.Enable
+	returned := prowlarr.SettingsFromFields(*schema, added.Fields)
+	cfg.Trackers[i].ProwlarrSettings = prowlarr.MergeSettings(*schema, settings, returned)
+	now := time.Now()
+	cfg.Trackers[i].ProwlarrLastSync = &now
+	cfg.Trackers[i].ProwlarrSyncError = ""
 	return "created", nil
 }
 
@@ -276,5 +298,5 @@ func flashSyncResult(w http.ResponseWriter, r *http.Request, pushed, failures []
 		q.Set("ok", okMsg)
 	}
 	q.Set("err", errMsg)
-	http.Redirect(w, r, "/?" +q.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, "/?"+q.Encode(), http.StatusSeeOther)
 }

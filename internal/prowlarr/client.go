@@ -56,6 +56,7 @@ type SchemaField struct {
 	Value         interface{}    `json:"value,omitempty"`
 	SelectOptions []SelectOption `json:"selectOptions,omitempty"`
 	Advanced      bool           `json:"advanced,omitempty"`
+	Required      bool           `json:"required,omitempty"`
 }
 
 type SelectOption struct {
@@ -197,6 +198,10 @@ func (c *Client) SchemaByName(name string) (*IndexerSchema, error) {
 
 func (c *Client) AddIndexer(schema IndexerSchema, trackerURL, apiKey string) (*Indexer, error) {
 	fields := populateFields(schema.Fields, trackerURL, apiKey)
+	return c.AddIndexerWithFields(schema, fields)
+}
+
+func (c *Client) AddIndexerWithFields(schema IndexerSchema, fields []SchemaField) (*Indexer, error) {
 	payload := map[string]interface{}{
 		"name":               schema.Name,
 		"enable":             true,
@@ -245,6 +250,11 @@ func (c *Client) SetEnabled(indexer Indexer, enabled bool) error {
 // re-testing the connection (the dashboard already validated against the tracker).
 func (c *Client) UpdateIndexer(indexer Indexer, trackerURL, apiKey string) (*Indexer, error) {
 	indexer.Fields = populateFields(indexer.Fields, trackerURL, apiKey)
+	return c.UpdateIndexerWithFields(indexer, indexer.Fields)
+}
+
+func (c *Client) UpdateIndexerWithFields(indexer Indexer, fields []SchemaField) (*Indexer, error) {
+	indexer.Fields = fields
 	data, err := json.Marshal(indexer)
 	if err != nil {
 		return nil, err
