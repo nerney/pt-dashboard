@@ -532,6 +532,9 @@ func (h *Handler) configTrackerProwlarrRemove(w http.ResponseWriter, r *http.Req
 
 	cfg.Trackers[idx].ProwlarrID = 0
 	cfg.Trackers[idx].Enabled = false
+	cfg.Trackers[idx].ProwlarrName = ""
+	cfg.Trackers[idx].ProwlarrAppProfileID = 0
+	cfg.Trackers[idx].ProwlarrTags = nil
 	if err := h.store.Save(cfg); err != nil {
 		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
 		return

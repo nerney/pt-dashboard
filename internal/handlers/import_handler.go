@@ -232,13 +232,16 @@ func (h *Handler) buildImportEntry(
 		return nil, skipAlreadyManaged
 	}
 	return &config.TrackerEntry{
-		DefinitionName: schemaName,
-		TrackerType:    typeMap[strings.ToLower(schemaName)],
-		Name:           idx.Name,
-		TrackerURL:     idxURL,
-		APIKey:         key,
-		ProwlarrID:     idx.ID,
-		Enabled:        idx.Enable,
+		DefinitionName:       schemaName,
+		TrackerType:          typeMap[strings.ToLower(schemaName)],
+		Name:                 idx.Name,
+		TrackerURL:           idxURL,
+		APIKey:               key,
+		ProwlarrID:           idx.ID,
+		Enabled:              idx.Enable,
+		ProwlarrName:         prowlarr.BaseIndexerName(idx.Name),
+		ProwlarrAppProfileID: idx.AppProfileID,
+		ProwlarrTags:         append([]int(nil), idx.Tags...),
 	}, ""
 }
 

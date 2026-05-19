@@ -17,7 +17,17 @@ func templateFuncs() template.FuncMap {
 		"staleAge":      staleAge,
 		"isStale":       isStale,
 		"ratioClassStr": ratioClassStr,
+		"hasInt":        hasInt,
 	}
+}
+
+func hasInt(values []int, target int) bool {
+	for _, v := range values {
+		if v == target {
+			return true
+		}
+	}
+	return false
 }
 
 // ratioClass maps a numeric ratio to a CSS class name.

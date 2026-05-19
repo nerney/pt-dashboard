@@ -252,3 +252,24 @@ func TestManagedIndexerNamePreservesExistingSuffix(t *testing.T) {
 		t.Fatalf("ManagedIndexerName() = %q", got)
 	}
 }
+
+func TestBaseIndexerNameRemovesManagedSuffix(t *testing.T) {
+	got := BaseIndexerName("Example Tracker [ptv]")
+	if got != "Example Tracker" {
+		t.Fatalf("BaseIndexerName() = %q", got)
+	}
+}
+
+func TestDiffRootConfigComparesTagsAsSet(t *testing.T) {
+	left := IndexerRootConfig{Name: "Tracker [ptv]", Enable: true, AppProfileID: 1, Tags: []int{2, 1}}
+	right := IndexerRootConfig{Name: "Tracker [ptv]", Enable: true, AppProfileID: 1, Tags: []int{1, 2}}
+	if diff := DiffRootConfig(left, right); len(diff) != 0 {
+		t.Fatalf("DiffRootConfig() = %v, want no drift", diff)
+	}
+
+	right.Tags = []int{1, 3}
+	diff := DiffRootConfig(left, right)
+	if len(diff) != 1 || diff[0] != "Tags" {
+		t.Fatalf("DiffRootConfig() = %v, want Tags drift", diff)
+	}
+}

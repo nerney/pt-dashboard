@@ -142,9 +142,14 @@ func (h *Handler) classifyTracker(i int, t *config.TrackerEntry, byID map[int]pr
 	}
 	desired := prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings, t.TrackerURL, t.APIKey)
 	actual := prowlarr.SettingsFromFields(*schema, idx.Fields)
+	root := h.desiredProwlarrRootForCompare(t, *schema)
+	actualRoot := prowlarr.RootConfigFromIndexer(idx)
 	if !prowlarr.SettingsEqual(*schema, desired, actual) {
 		row.State = syncDrift
 		row.DiffFields = prowlarr.DiffSettings(*schema, desired, actual)
+	} else if !prowlarr.RootConfigsEqual(root, actualRoot) {
+		row.State = syncDrift
+		row.DiffFields = prowlarr.DiffRootConfig(root, actualRoot)
 	} else {
 		row.State = syncSynced
 	}
@@ -247,16 +252,22 @@ func (h *Handler) pushTrackerToProwlarr(
 	}
 	settings := prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings, t.TrackerURL, t.APIKey)
 	fields := prowlarr.FieldsForPayload(*schema, settings)
-	managedName := prowlarr.ManagedIndexerName(t.Name)
+	root, rootErr := h.prowlarrRootConfig(cfg, i, *schema, client)
+	if rootErr != nil {
+		return "pushed", rootErr
+	}
 
 	// Update path: dashboard has a Prowlarr ID AND Prowlarr still has it.
 	if t.ProwlarrID != 0 {
 		if existing, ok := byID[t.ProwlarrID]; ok {
-			updated, uErr := client.UpdateIndexerWithFields(existing, fields, managedName)
+			updated, uErr := client.UpdateIndexerWithRoot(existing, fields, root)
 			if uErr != nil {
 				return "updated", uErr
 			}
 			cfg.Trackers[i].Enabled = updated.Enable
+			cfg.Trackers[i].ProwlarrName = prowlarr.BaseIndexerName(updated.Name)
+			cfg.Trackers[i].ProwlarrAppProfileID = updated.AppProfileID
+			cfg.Trackers[i].ProwlarrTags = append([]int(nil), updated.Tags...)
 			returned := prowlarr.SettingsFromFields(*schema, updated.Fields)
 			cfg.Trackers[i].ProwlarrSettings = prowlarr.MergeSettings(*schema, settings, returned)
 			now := time.Now()
@@ -276,18 +287,30 @@ func (h *Handler) pushTrackerToProwlarr(
 		}
 	}
 	payloadSchema := prowlarr.IndexerSchemaForPayload(*schema, appProfileID)
-	added, aErr := client.AddIndexerWithFields(payloadSchema, fields, managedName)
+	root.AppProfileID = appProfileID
+	added, aErr := client.AddIndexerWithRoot(payloadSchema, fields, root)
 	if aErr != nil {
 		return "created", aErr
 	}
 	cfg.Trackers[i].ProwlarrID = added.ID
 	cfg.Trackers[i].Enabled = added.Enable
+	cfg.Trackers[i].ProwlarrName = prowlarr.BaseIndexerName(added.Name)
+	cfg.Trackers[i].ProwlarrAppProfileID = added.AppProfileID
+	cfg.Trackers[i].ProwlarrTags = append([]int(nil), added.Tags...)
 	returned := prowlarr.SettingsFromFields(*schema, added.Fields)
 	cfg.Trackers[i].ProwlarrSettings = prowlarr.MergeSettings(*schema, settings, returned)
 	now := time.Now()
 	cfg.Trackers[i].ProwlarrLastSync = &now
 	cfg.Trackers[i].ProwlarrSyncError = ""
 	return "created", nil
+}
+
+func (h *Handler) desiredProwlarrRootForCompare(t *config.TrackerEntry, schema prowlarr.IndexerSchema) prowlarr.IndexerRootConfig {
+	appProfileID := t.ProwlarrAppProfileID
+	if appProfileID <= 0 {
+		appProfileID = schema.AppProfileID
+	}
+	return prowlarr.RootConfig(prowlarrBaseName(t), t.Enabled, appProfileID, t.ProwlarrTags)
 }
 
 // flashSyncResult mirrors flashImportResult — same three-way redirect
