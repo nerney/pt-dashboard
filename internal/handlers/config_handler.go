@@ -374,26 +374,24 @@ func (h *Handler) trackerIndex(r *http.Request) (int, *config.Config, bool) {
 }
 
 // configTrackerUpdate accepts URL and API-key edits. Either field may
-// be blank to mean "keep existing". Validation rules match configAdd
-// (validate by default, FORCE SAVE skips validation but clears the
-// stats so the UI reflects "stats unknown until re-validated").
+// be blank to mean "keep existing". Always validates; if validation fails,
+// renders the config page with error and "Save Anyway" option.
 func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
-	basePath := trackerPTVConfigPath(idx)
 	if err := r.ParseForm(); err != nil {
-		flash(w, r, basePath, "", "invalid form")
+		flash(w, r, trackerConfigPath(idx), "", "invalid form")
 		return
 	}
-	override := r.FormValue("override") == "true"
+
+	forceSave := r.FormValue("force_save") == "true"
 	newURL := strings.TrimSpace(r.FormValue("url"))
 	newKey := strings.TrimSpace(r.FormValue("api_key"))
 
-	// "Keep existing on blank" — applied after trim so accidental
-	// whitespace doesn't wipe a configured value.
+	// "Keep existing on blank" — applied after trim
 	effURL := cfg.Trackers[idx].TrackerURL
 	effKey := cfg.Trackers[idx].APIKey
 	if newURL != "" {
@@ -404,13 +402,13 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	name := cfg.Trackers[idx].Name
 
-	if !override {
+	// Always validate unless force saving
+	if !forceSave {
 		stats, vErr := h.validateTracker(cfg.Trackers[idx].TrackerType, effURL, effKey)
 		if vErr != nil {
 			h.log.Err("CONFIG", fmt.Sprintf("Validation failed for %q: %s", name, vErr.Error()))
-			flash(w, r, basePath, "", fmt.Sprintf(
-				"%s validation failed: %s — use FORCE SAVE to save without validation, or fix credentials and retry.",
-				name, vErr.Error()))
+			// Render the config page with validation error
+			h.renderTrackerConfigWithError(w, r, idx, cfg, vErr.Error())
 			return
 		}
 		now := time.Now()
@@ -418,7 +416,7 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 		cfg.Trackers[idx].LastSync = &now
 		cfg.Trackers[idx].SyncError = ""
 	} else {
-		// FORCE SAVE: clear stats — we can't claim they're current.
+		// Save anyway: clear stats since we're not validating
 		cfg.Trackers[idx].UserStats = nil
 		cfg.Trackers[idx].LastSync = nil
 		cfg.Trackers[idx].SyncError = ""
@@ -428,12 +426,12 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	cfg.Trackers[idx].APIKey = effKey
 
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		flash(w, r, trackerConfigPath(idx), "", "Save failed: "+err.Error())
 		return
 	}
-	h.log.Info("CONFIG", fmt.Sprintf("Updated tracker %q credentials (override=%v)", name, override))
+	h.log.Info("CONFIG", fmt.Sprintf("Updated tracker %q credentials (forceSave=%v)", name, forceSave))
 	h.discoverBrandingAsync(cfg.Trackers[idx].DefinitionName, cfg.Trackers[idx].TrackerURL)
-	flash(w, r, basePath, name+" updated.", "")
+	flash(w, r, trackerConfigPath(idx), name+" updated.", "")
 }
 
 // configTrackerProwlarrAdd creates a new indexer in Prowlarr from the

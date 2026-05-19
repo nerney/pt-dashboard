@@ -1,0 +1,252 @@
+{{ define "content" }}
+<header class="site-header">
+  <div class="header-brand">
+    <a href="/" class="brand-link">
+      <span class="brand-back">←</span>
+      <img src="/static/icon.png" alt="" class="brand-icon">
+      <span class="brand-mark">PTV</span>
+      <span class="brand-sep">—</span>
+      <span class="brand-sub">{{ .Tracker.Name }}</span>
+    </a>
+  </div>
+</header>
+<div class="page-rule"></div>
+<main class="config-main">
+  {{ if .FlashError }}<div class="alert alert-error"><span class="alert-dot">●</span>{{ .FlashError }}</div>{{ end }}
+  {{ if .FlashSuccess }}<div class="alert alert-ok"><span class="alert-dot">●</span>{{ .FlashSuccess }}</div>{{ end }}
+  {{ if .ValidationError }}
+  <div class="alert alert-error">
+    <span class="alert-dot">●</span>
+    <strong>{{ .ValidationTrackerName }} validation failed:</strong> {{ .ValidationError }}
+  </div>
+  {{ end }}
+
+  <!-- PTV Config Section -->
+  <section class="config-section">
+    <h2 class="config-section-title">
+      <input type="checkbox" id="ptv-toggle" class="section-toggle" checked>
+      <label for="ptv-toggle">PTV Configuration</label>
+    </h2>
+    <div class="section-rule"></div>
+    <div class="section-content">
+      <form method="POST" action="/tracker/{{ .TrackerIdx }}/config" class="config-form">
+        <div class="config-row">
+          <div class="field">
+            <label class="field-label">URL</label>
+            {{ $current := .Tracker.TrackerURL }}
+            {{ if gt (len .URLs) 1 }}
+            <select class="field-input field-select" name="url">
+              {{ range .URLs }}<option value="{{ . }}" {{ if eq . $current }}selected{{ end }}>{{ . }}</option>{{ end }}
+            </select>
+            {{ else if eq (len .URLs) 1 }}
+            <input type="hidden" name="url" value="{{ index .URLs 0 }}">
+            <div class="field-authoritative">{{ index .URLs 0 }}</div>
+            {{ else }}
+            <input class="field-input" type="url" name="url" value="{{ $current }}" autocomplete="off">
+            {{ end }}
+          </div>
+          <div class="field">
+            <label class="field-label">API KEY</label>
+            <input class="field-input field-token" type="text" name="api_key" placeholder="set — enter new key to replace" autocomplete="off">
+          </div>
+        </div>
+        <div class="import-submit-row">
+          <a href="/" class="btn-sm btn-ghost">CANCEL</a>
+          {{ if .ValidationError }}
+          <input type="hidden" name="force_save" value="true">
+          <button type="submit" class="btn-primary">SAVE ANYWAY →</button>
+          {{ else }}
+          <button type="submit" class="btn-primary">VALIDATE &amp; SAVE →</button>
+          {{ end }}
+        </div>
+      </form>
+      <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/delete" class="inline-form">
+        <button type="submit" class="btn-sm btn-danger" onclick="return confirm('Remove {{ .Tracker.Name }} from dashboard?')">DELETE TRACKER</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Prowlarr Config Section -->
+  {{ if .ProwlarrEnabled }}
+  <section class="config-section">
+    <h2 class="config-section-title">
+      <input type="checkbox" id="prowlarr-toggle" class="section-toggle">
+      <label for="prowlarr-toggle">Prowlarr Configuration</label>
+    </h2>
+    <div class="section-rule"></div>
+    <div class="section-content">
+      {{ if .ProwlarrError }}
+      <div class="alert alert-warn">
+        <span class="alert-dot">⚠</span>{{ .ProwlarrError }}
+      </div>
+      {{ else if .ProwlarrSchema }}
+      <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/prowlarr" class="config-form">
+        <div class="config-row prowlarr-field-row">
+          <div class="field">
+            <label class="field-label">Name</label>
+            <input class="field-input" type="text" name="prowlarr_name" value="{{ .Tracker.ProwlarrName }}" autocomplete="off">
+            <p class="config-hint">PTV appends [ptv] when syncing this indexer.</p>
+          </div>
+        </div>
+
+        <div class="config-row prowlarr-field-row">
+          <div class="field">
+            <label class="field-label">Enable</label>
+            <input type="hidden" name="enabled" value="false">
+            <label class="checkline">
+              <input type="checkbox" name="enabled" value="true" {{ if .Tracker.Enabled }}checked{{ end }}>
+              <span>enabled in Prowlarr</span>
+            </label>
+          </div>
+        </div>
+
+        {{ if .ProwlarrAppProfiles }}
+        <div class="config-row prowlarr-field-row">
+          <div class="field">
+            <label class="field-label">Sync Profile</label>
+            <select class="field-input field-select" name="app_profile_id">
+              {{ range .ProwlarrAppProfiles }}
+              <option value="{{ .ID }}" {{ if eq .ID .Tracker.ProwlarrAppProfileID }}selected{{ end }}>{{ .Name }}</option>
+              {{ end }}
+            </select>
+          </div>
+        </div>
+        {{ end }}
+
+        {{ if .ProwlarrTags }}
+        <div class="config-row prowlarr-field-row">
+          <div class="field">
+            <label class="field-label">Tags</label>
+            {{ range .ProwlarrTags }}
+            <label class="checkline">
+              <input type="checkbox" name="tag" value="{{ .ID }}" {{ if hasInt .Tracker.ProwlarrTags .ID }}checked{{ end }}>
+              <span>{{ .Label }}</span>
+            </label>
+            {{ end }}
+          </div>
+        </div>
+        {{ end }}
+
+        {{ range .ProwlarrFields }}
+        <div class="config-row prowlarr-field-row">
+          <div class="field">
+            <label class="field-label">{{ .Label }}</label>
+            {{ if .Secret }}
+            <input class="field-input" type="password" name="setting_{{ .Name }}" autocomplete="off" {{ if .HasValue }}placeholder="set — enter new value to replace"{{ else if .Required }}placeholder="required"{{ end }}>
+            {{ else if eq .Type "checkbox" }}
+            <input type="hidden" name="setting_{{ .Name }}" value="false">
+            <label class="checkline">
+              <input type="checkbox" name="setting_{{ .Name }}" value="true" {{ if eq .Value "true" }}checked{{ end }}>
+              <span>enabled</span>
+            </label>
+            {{ else if eq .Type "select" }}
+            <select class="field-input field-select" name="setting_{{ .Name }}">
+              {{ range .SelectOptions }}
+              <option value="{{ .Value }}" {{ if eq .Value .Value }}selected{{ end }}>{{ .Name }}</option>
+              {{ end }}
+            </select>
+            {{ else }}
+            <input class="field-input" type="text" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off" placeholder="{{ .Placeholder }}">
+            {{ end }}
+            {{ if .HelpText }}<p class="config-hint">{{ .HelpText }}</p>{{ end }}
+          </div>
+        </div>
+        {{ end }}
+
+        <div class="import-submit-row">
+          <a href="/tracker/{{ .TrackerIdx }}/config" class="btn-sm btn-ghost">CANCEL</a>
+          <button type="submit" name="action" value="save" class="btn-sm btn-primary">SAVE</button>
+          <button type="submit" name="action" value="save_push" class="btn-primary">SAVE + PUSH →</button>
+        </div>
+      </form>
+      {{ if gt .Tracker.ProwlarrID 0 }}
+      <div class="import-submit-row">
+        <a href="/tracker/{{ .TrackerIdx }}/config/prowlarr/diff" class="btn-sm btn-ghost">VIEW DRIFT</a>
+      </div>
+      {{ end }}
+      {{ end }}
+    </div>
+  </section>
+  {{ end }}
+
+  <!-- Autobrr Config Section -->
+  {{ if .AutobrrEnabled }}
+  <section class="config-section">
+    <h2 class="config-section-title">
+      <input type="checkbox" id="autobrr-toggle" class="section-toggle">
+      <label for="autobrr-toggle">Autobrr Configuration</label>
+    </h2>
+    <div class="section-rule"></div>
+    <div class="section-content">
+      {{ if .AutobrrError }}
+      <div class="alert alert-warn">
+        <span class="alert-dot">⚠</span>{{ .AutobrrError }}
+      </div>
+      {{ else if .AutobrrDefinition }}
+      <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/autobrr" class="config-form">
+        {{ range .AutobrrFields }}
+        <div class="config-row autobrr-field-row">
+          <div class="field">
+            <label class="field-label">{{ .Label }}</label>
+            {{ if .Secret }}
+            <input class="field-input" type="password" name="setting_{{ .Name }}" autocomplete="off" {{ if .HasValue }}placeholder="set — enter new value to replace"{{ else }}placeholder="required"{{ end }}>
+            {{ else if eq .Type "checkbox" }}
+            <input type="hidden" name="setting_{{ .Name }}" value="false">
+            <label class="checkline">
+              <input type="checkbox" name="setting_{{ .Name }}" value="true" {{ if .Value }}checked{{ end }}>
+              <span>enabled</span>
+            </label>
+            {{ else if eq .Type "number" }}
+            <input class="field-input" type="number" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
+            {{ else }}
+            <input class="field-input" type="text" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
+            {{ end }}
+            {{ if .Help }}<p class="config-hint">{{ .Help }}</p>{{ end }}
+            {{ if eq .Layer "irc" }}<p class="config-hint muted">IRC setting</p>{{ end }}
+          </div>
+        </div>
+        {{ end }}
+
+        <div class="import-submit-row">
+          <a href="/tracker/{{ .TrackerIdx }}/config" class="btn-sm btn-ghost">CANCEL</a>
+          <button type="submit" name="action" value="save" class="btn-sm btn-primary">SAVE</button>
+          <button type="submit" name="action" value="save_push" class="btn-primary">SAVE + PUSH →</button>
+        </div>
+      </form>
+      {{ if gt .Tracker.AutobrrID 0 }}
+      <div class="import-submit-row">
+        <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/autobrr/toggle" class="inline-form">
+          <button type="submit" class="btn-sm btn-ghost">{{ if .Tracker.AutobrrEnabled }}DISABLE IN AUTOBRR{{ else }}ENABLE IN AUTOBRR{{ end }}</button>
+        </form>
+        <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/autobrr/remove" class="inline-form">
+          <button type="submit" class="btn-sm btn-danger">REMOVE FROM AUTOBRR</button>
+        </form>
+      </div>
+      {{ else }}
+      <div class="import-submit-row">
+        <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/autobrr/add" class="inline-form">
+          <button type="submit" class="btn-primary">ADD TO AUTOBRR →</button>
+        </form>
+      </div>
+      {{ end }}
+      {{ end }}
+    </div>
+  </section>
+  {{ end }}
+</main>
+
+<style>
+.section-toggle {
+  cursor: pointer;
+  margin-right: 8px;
+}
+.section-content {
+  max-height: 10000px;
+  transition: max-height 0.3s ease-out;
+}
+.section-toggle:not(:checked) ~ .section-rule,
+.section-toggle:not(:checked) ~ .section-content {
+  display: none;
+}
+</style>
+{{ end }}
