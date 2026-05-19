@@ -22,10 +22,14 @@
 
     <form method="POST" action="/login" class="auth-form" autocomplete="off">
       <div class="field">
-        <label class="field-label">PASSWORD</label>
-        <input class="field-input" type="password" name="password" required autofocus>
+        <label class="field-label">USERNAME</label>
+        <input class="field-input" type="text" name="username" required autofocus>
       </div>
-      <button type="submit" class="btn-primary auth-submit">UNLOCK →</button>
+      <div class="field">
+        <label class="field-label">PASSWORD</label>
+        <input class="field-input" type="password" name="password" required>
+      </div>
+      <button type="submit" class="btn-primary auth-submit">LOG IN →</button>
     </form>
   </section>
 </main>
