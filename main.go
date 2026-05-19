@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,8 @@ import (
 	"github.com/nerney/ptv/internal/logger"
 	_ "github.com/nerney/ptv/internal/unit3d" // registers UNIT3D TrackerType
 )
+
+const startupDefsTimeout = 30 * time.Second
 
 //go:embed templates static
 var assets embed.FS
@@ -47,16 +50,29 @@ func main() {
 
 	syncer := defs.New(configDir, log)
 	syncer.Start(context.Background())
-	if err := syncer.WaitReady(context.Background()); err != nil {
-		log.Err("SYSTEM", "definitions unavailable: "+err.Error())
-		os.Exit(1)
+	if err := waitStartupDefs(syncer.WaitReady); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			log.Warn("STARTUP", "defs sync slow - proceeding without ready catalog; will retry in background")
+		} else {
+			log.Err("SYSTEM", "definitions unavailable: "+err.Error())
+			os.Exit(1)
+		}
 	}
 
-	// Autobrr definitions are optional — a clone failure is logged but does
-	// not block startup. The catalog becomes available once the goroutine
-	// completes, well before the user reaches any autobrr config UI.
+	// Autobrr definitions are optional. A slow first sync is logged without
+	// delaying the web server; the catalog becomes available when the
+	// background goroutine completes.
 	autobrrSyncer := autobrrdefs.New(configDir, log)
 	autobrrSyncer.Start(context.Background())
+	go func() {
+		if err := waitStartupDefs(autobrrSyncer.WaitReady); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				log.Warn("STARTUP", "autobrr defs sync slow - proceeding without ready catalog; will retry in background")
+				return
+			}
+			log.Err("AUTOBRR-DEFS", err.Error())
+		}
+	}()
 
 	router := handlers.NewRouter(store, syncer, autobrrSyncer, assets)
 
@@ -85,4 +101,10 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Err("SYSTEM", "shutdown: "+err.Error())
 	}
+}
+
+func waitStartupDefs(waitReady func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), startupDefsTimeout)
+	defer cancel()
+	return waitReady(ctx)
 }
