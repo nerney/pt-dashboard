@@ -38,6 +38,13 @@ type prowlarrDiffData struct {
 	Row prowlarrSyncRow
 }
 
+type autobrrDiffData struct {
+	trackerConfigData
+	State      string
+	DiffFields []string
+	FetchError string
+}
+
 type unifiedTrackerConfigData struct {
 	TrackerIdx            int
 	Tracker               *config.TrackerEntry
@@ -241,29 +248,9 @@ func (h *Handler) trackerAutobrrConfigPost(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if cfg.Trackers[idx].AutobrrID() == 0 {
-		flash(w, r, trackerConfigPath(idx), "", "Tracker not linked to Autobrr")
-		return
-	}
-
-	if err := h.pushTrackerAutobrrConfig(cfg, idx, *def); err != nil {
-		cfg.Trackers[idx].EnsureAutobrr().SyncError = err.Error()
-		if saveErr := h.store.Save(cfg); saveErr != nil {
-			h.log.Err("CONFIG", fmt.Sprintf("Autobrr push failed for %q: %s", cfg.Trackers[idx].Name, err.Error()))
-			h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Push failed: "+err.Error()+"; save failed", saveErr)
-			return
-		}
-		h.flashError(w, r, trackerConfigPath(idx), "AUTOBRR", "Autobrr push failed", err)
-		return
-	}
-
-	if err := h.store.Save(cfg); err != nil {
-		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Push succeeded but save failed", err)
-		return
-	}
-
-	h.log.Info("CONFIG", fmt.Sprintf("Pushed Autobrr settings for %q", cfg.Trackers[idx].Name))
-	flash(w, r, trackerConfigPath(idx), "Autobrr settings pushed.", "")
+	// "save_push" redirects to the diff page so the user can review before committing.
+	h.log.Info("CONFIG", fmt.Sprintf("Saved Autobrr settings for %q (awaiting diff confirmation)", cfg.Trackers[idx].Name))
+	flash(w, r, trackerAutobrrDiffPath(idx), "Autobrr settings saved. Review drift before pushing.", "")
 }
 
 func (h *Handler) trackerAddPage(w http.ResponseWriter, r *http.Request) {
@@ -353,6 +340,89 @@ func trackerConfigPath(idx int) string {
 
 func trackerProwlarrDiffPath(idx int) string {
 	return "/tracker/" + strconv.Itoa(idx) + "/config/prowlarr/diff"
+}
+
+func trackerAutobrrDiffPath(idx int) string {
+	return "/tracker/" + strconv.Itoa(idx) + "/config/autobrr/diff"
+}
+
+func (h *Handler) trackerAutobrrDiffPage(w http.ResponseWriter, r *http.Request) {
+	idx, cfg, ok := h.trackerIndex(r)
+	if !ok {
+		flash(w, r, "/", "", "invalid tracker index")
+		return
+	}
+	data := autobrrDiffData{
+		trackerConfigData: h.trackerConfigData(idx, cfg.Trackers[idx], cfg, r, "autobrr"),
+	}
+	if !data.AutobrrEnabled {
+		h.render(w, r, "tracker_autobrr_diff", data)
+		return
+	}
+	t := cfg.Trackers[idx]
+	if t.AutobrrID() == 0 {
+		data.State = "new"
+		h.render(w, r, "tracker_autobrr_diff", data)
+		return
+	}
+	def := h.autobrrDefFor(t, t.AutobrrIdentifier())
+	if def == nil {
+		data.FetchError = "Definition not available for drift check"
+		data.State = "unknown"
+		h.render(w, r, "tracker_autobrr_diff", data)
+		return
+	}
+	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
+	live, err := client.GetIndexer(int64(t.AutobrrID()))
+	if err != nil {
+		data.FetchError = "Failed to fetch live Autobrr state: " + err.Error()
+		data.State = "unknown"
+		h.render(w, r, "tracker_autobrr_diff", data)
+		return
+	}
+	liveSettings := autobrr.SettingsFromPairs(live.Settings)
+	desired := autobrr.WithCoreCredentials(*def, t.AutobrrSettings(), t.APIKey)
+	diffs := autobrr.DiffSettings(*def, desired, liveSettings)
+	if len(diffs) == 0 {
+		data.State = "synced"
+	} else {
+		data.State = "drift"
+		data.DiffFields = diffs
+	}
+	h.render(w, r, "tracker_autobrr_diff", data)
+}
+
+func (h *Handler) trackerAutobrrDiffPush(w http.ResponseWriter, r *http.Request) {
+	idx, cfg, ok := h.trackerIndex(r)
+	if !ok {
+		flash(w, r, "/", "", "invalid tracker index")
+		return
+	}
+	if !cfg.AutobrrEnabled || cfg.AutobrrURL == "" || cfg.AutobrrAPIKey == "" {
+		flash(w, r, trackerAutobrrDiffPath(idx), "", "Autobrr not enabled")
+		return
+	}
+	if cfg.Trackers[idx].AutobrrID() == 0 {
+		flash(w, r, trackerAutobrrDiffPath(idx), "", "Tracker not linked to Autobrr")
+		return
+	}
+	def := h.autobrrDefFor(cfg.Trackers[idx], cfg.Trackers[idx].AutobrrIdentifier())
+	if def == nil {
+		flash(w, r, trackerAutobrrDiffPath(idx), "", "Definition not available")
+		return
+	}
+	if err := h.pushTrackerAutobrrConfig(cfg, idx, *def); err != nil {
+		cfg.Trackers[idx].EnsureAutobrr().SyncError = err.Error()
+		h.store.Save(cfg)
+		h.flashError(w, r, trackerAutobrrDiffPath(idx), "AUTOBRR", "Autobrr push failed", err)
+		return
+	}
+	if err := h.store.Save(cfg); err != nil {
+		h.flashError(w, r, trackerAutobrrDiffPath(idx), "CONFIG", "Push succeeded but save failed", err)
+		return
+	}
+	h.log.Info("CONFIG", fmt.Sprintf("Pushed Autobrr settings for %q", cfg.Trackers[idx].Name))
+	flash(w, r, trackerConfigPath(idx), "Autobrr settings pushed.", "")
 }
 
 func (h *Handler) renderTrackerConfigWithError(w http.ResponseWriter, r *http.Request, idx int, cfg *config.Config, submittedURL, submittedKey, validationError string) {

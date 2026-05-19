@@ -1,0 +1,67 @@
+{{ define "content" }}
+<header class="site-header">
+  <div class="header-brand">
+    <a href="/tracker/{{ .TrackerIdx }}/config" class="brand-link">
+      <span class="brand-back">←</span>
+      <img src="/static/icon.png" alt="" class="brand-icon">
+      <span class="brand-mark">PTV</span>
+      <span class="brand-sep">—</span>
+      <span class="brand-sub">{{ .Tracker.Name }} / AUTOBRR DIFF</span>
+    </a>
+  </div>
+</header>
+<nav class="config-nav">
+  <a href="/" class="config-nav-back">← DASHBOARD</a>
+  <span class="config-nav-sep">/</span>
+  <a href="/tracker/{{ .TrackerIdx }}/config" class="config-nav-link">TRACKER CONFIG</a>
+  <form method="POST" action="/logout" class="inline-form config-nav-logout-form">
+    {{ $.CSRFField }}
+    <button type="submit" class="config-nav-logout-btn">LOGOUT</button>
+  </form>
+</nav>
+<div class="page-rule"></div>
+<main class="config-main">
+  {{ if .FlashError }}<div class="alert alert-error"><span class="alert-dot">●</span>{{ .FlashError }}</div>{{ end }}
+  {{ if .FlashSuccess }}<div class="alert alert-ok"><span class="alert-dot">●</span>{{ .FlashSuccess }}</div>{{ end }}
+
+  {{ if not .AutobrrEnabled }}
+  <section class="config-section">
+    <h2 class="config-section-title">AUTOBRR REQUIRED</h2>
+    <div class="section-rule"></div>
+    <p class="config-hint">Autobrr is not enabled.</p>
+  </section>
+  {{ else }}
+  <section class="config-section">
+    <h2 class="config-section-title">{{ .Tracker.Name }}<span class="muted"> — pending Autobrr push</span></h2>
+    <div class="section-rule"></div>
+    {{ if eq .State "new" }}
+    <p class="config-hint">This tracker is not linked to Autobrr yet. Link it from the tracker config page before pushing.</p>
+    {{ else if eq .State "synced" }}
+    <p class="config-hint">Dashboard and Autobrr already match.</p>
+    {{ else if eq .State "unknown" }}
+    {{ if .FetchError }}
+    <div class="alert alert-warn"><span class="alert-dot">⚠</span>{{ .FetchError }}</div>
+    {{ else }}
+    <p class="config-hint">Drift status could not be determined. Pushing will overwrite Autobrr with the saved PTV values.</p>
+    {{ end }}
+    {{ else }}
+    <p class="config-hint">Pushing will overwrite Autobrr for this indexer with the saved PTV values.</p>
+    {{ if .DiffFields }}
+    <div class="sync-list">
+      <div class="sync-row sync-row-drift">
+        <span class="sync-row-tag sync-row-tag-drift">DRIFT</span>
+        <span class="sync-row-name">{{ .Tracker.Name }}</span>
+        <span class="muted">fields: {{ range $i, $f := .DiffFields }}{{ if $i }}, {{ end }}{{ $f }}{{ end }}</span>
+      </div>
+    </div>
+    {{ end }}
+    {{ end }}
+    <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/autobrr/diff" class="import-submit-row">
+    {{ $.CSRFField }}
+      <a href="/tracker/{{ .TrackerIdx }}/config" class="btn-sm btn-ghost">CANCEL</a>
+      {{ if and (ne .State "new") (ne .State "synced") }}<button type="submit" class="btn-primary">PUSH TO AUTOBRR →</button>{{ end }}
+    </form>
+  </section>
+  {{ end }}
+</main>
+{{ end }}

@@ -21,8 +21,30 @@
     <p class="config-hint">Autobrr is not enabled.</p>
   </section>
   {{ else }}
+  {{ if .LoadError }}
+  <section class="config-section">
+    <div class="alert alert-error"><span class="alert-dot">●</span>{{ .LoadError }}</div>
+  </section>
+  {{ else }}
   <form method="POST" action="/sync/autobrr" class="sync-form">
     {{ $.CSRFField }}
+    {{ if .Drift }}
+    <section class="config-section">
+      <h2 class="config-section-title">DRIFT<span class="muted"> — {{ len .Drift }}</span></h2>
+      <div class="section-rule"></div>
+      <p class="config-hint">These trackers are linked but have settings that differ from Autobrr. Pushing will overwrite Autobrr with PTV's values.</p>
+      <div class="sync-list">
+        {{ range .Drift }}
+        <label class="sync-row sync-row-drift">
+          <input type="checkbox" name="tracker_idx" value="{{ .TrackerIdx }}" class="sync-check sync-check-row" checked>
+          <span class="sync-row-tag sync-row-tag-drift">DRIFT</span>
+          <span class="sync-row-name">{{ .Name }}</span>
+          <span class="muted">fields: {{ range $i, $f := .DiffFields }}{{ if $i }}, {{ end }}{{ $f }}{{ end }}</span>
+        </label>
+        {{ end }}
+      </div>
+    </section>
+    {{ end }}
     {{ if .New }}
     <section class="config-section">
       <h2 class="config-section-title">NEW IN AUTOBRR<span class="muted"> — {{ len .New }}</span></h2>
@@ -47,7 +69,7 @@
       <div class="sync-list">
         {{ range .Linked }}
         <label class="sync-row sync-row-synced">
-          <input type="checkbox" name="tracker_idx" value="{{ .TrackerIdx }}" class="sync-check sync-check-row" checked>
+          <input type="checkbox" name="tracker_idx" value="{{ .TrackerIdx }}" class="sync-check sync-check-row">
           <span class="sync-row-tag sync-row-tag-ok">✓</span>
           <span class="sync-row-name">{{ .Name }}</span>
           <span class="sync-row-url">#{{ .AutobrrID }}</span>
@@ -56,13 +78,14 @@
       </div>
     </section>
     {{ end }}
-    {{ if or .New .Linked }}
+    {{ if or .New .Linked .Drift }}
     <div class="import-submit-row">
       <a href="/" class="btn-sm btn-ghost">CANCEL</a>
       <button type="submit" class="btn-primary">PUSH SELECTED →</button>
     </div>
     {{ end }}
   </form>
+  {{ end }}
   {{ end }}
 </main>
 {{ end }}

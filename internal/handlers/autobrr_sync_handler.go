@@ -19,6 +19,7 @@ type autobrrSyncRow struct {
 	TrackerURL string
 	AutobrrID  int
 	State      string
+	DiffFields []string
 	Error      string
 }
 
@@ -29,6 +30,7 @@ type autobrrSyncData struct {
 	FlashSuccess   string
 	New            []autobrrSyncRow
 	Linked         []autobrrSyncRow
+	Drift          []autobrrSyncRow
 }
 
 func (h *Handler) autobrrSyncPage(w http.ResponseWriter, r *http.Request) {
@@ -42,14 +44,52 @@ func (h *Handler) autobrrSyncPage(w http.ResponseWriter, r *http.Request) {
 		h.render(w, r, "autobrr_sync", data)
 		return
 	}
+
+	// Fetch live indexers once so we can detect drift for linked trackers
+	// without an individual API call per tracker.
+	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
+	liveIndexers, err := client.GetIndexers()
+	if err != nil {
+		data.LoadError = "Failed to fetch Autobrr indexers: " + err.Error()
+		h.render(w, r, "autobrr_sync", data)
+		return
+	}
+	liveByID := make(map[int64]autobrr.Indexer, len(liveIndexers))
+	for _, idx := range liveIndexers {
+		liveByID[idx.ID] = idx
+	}
+
 	for i, t := range cfg.Trackers {
 		row := autobrrSyncRow{TrackerIdx: i, Name: t.Name, TrackerURL: t.TrackerURL, AutobrrID: t.AutobrrID()}
-		if t.AutobrrID() > 0 {
-			row.State = "linked"
-			data.Linked = append(data.Linked, row)
-		} else {
+		if t.AutobrrID() == 0 {
 			row.State = "new"
 			data.New = append(data.New, row)
+			continue
+		}
+		live, exists := liveByID[int64(t.AutobrrID())]
+		if !exists {
+			// ID is stale — treat as new so user can re-link.
+			row.State = "new"
+			data.New = append(data.New, row)
+			continue
+		}
+		def := h.autobrrDefFor(t, t.AutobrrIdentifier())
+		if def == nil {
+			// No def available; can't check drift — classify as linked.
+			row.State = "linked"
+			data.Linked = append(data.Linked, row)
+			continue
+		}
+		liveSettings := autobrr.SettingsFromPairs(live.Settings)
+		desired := autobrr.WithCoreCredentials(*def, t.AutobrrSettings(), t.APIKey)
+		diffs := autobrr.DiffSettings(*def, desired, liveSettings)
+		if len(diffs) > 0 {
+			row.State = "drift"
+			row.DiffFields = diffs
+			data.Drift = append(data.Drift, row)
+		} else {
+			row.State = "linked"
+			data.Linked = append(data.Linked, row)
 		}
 	}
 	h.render(w, r, "autobrr_sync", data)

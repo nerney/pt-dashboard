@@ -158,6 +158,8 @@ func NewRouter(store *config.Store, syncer *defs.Syncer, autobrrSyncer *autobrrd
 		r.Get("/tracker/{idx}/config/prowlarr/diff", h.trackerProwlarrDiffPage)
 		r.Post("/tracker/{idx}/config/prowlarr/diff", h.trackerProwlarrDiffPush)
 		r.Post("/tracker/{idx}/config/autobrr", h.trackerAutobrrConfigPost)
+		r.Get("/tracker/{idx}/config/autobrr/diff", h.trackerAutobrrDiffPage)
+		r.Post("/tracker/{idx}/config/autobrr/diff", h.trackerAutobrrDiffPush)
 		r.Post("/trackers/add", h.configAdd)
 		r.Post("/tracker/{idx}/config/ptv", h.configTrackerUpdate)
 		r.Post("/tracker/{idx}/config/delete", h.configTrackerDelete)
@@ -422,6 +424,7 @@ func (h *Handler) parseTemplates() map[string]*template.Template {
 		"prowlarr_sync":          parse("layout", layout, configNav, prowlarrNav, "templates/prowlarr_sync.html"),
 		"autobrr_sync":           parse("layout", layout, "templates/autobrr_sync.html"),
 		"tracker_prowlarr_diff":  parse("layout", layout, "templates/tracker_prowlarr_diff.html"),
+		"tracker_autobrr_diff":   parse("layout", layout, "templates/tracker_autobrr_diff.html"),
 		"tracker_cards":          parse("tracker_cards", "templates/partials/tracker_cards.html", card),
 		"tracker_card":           parse("tracker_card", card),
 	}
