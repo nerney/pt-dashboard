@@ -9,6 +9,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -120,7 +121,7 @@ func NewRouter(store *config.Store, syncer *defs.Syncer, autobrrSyncer *autobrrd
 	r.Use(noCache)
 	r.Use(h.sleepGuard)
 	r.Use(h.ipAllowGuard)
-	r.Use(stripOriginMiddleware)
+	r.Use(reconcileHostMiddleware)
 	r.Use(csrfMiddleware())
 
 	// Static assets — IP-gated, but no session required (CSS shouldn't 302).
@@ -280,16 +281,36 @@ func (h *Handler) ipAllowGuard(next http.Handler) http.Handler {
 	})
 }
 
-// stripOriginMiddleware removes the Origin header before gorilla/csrf sees it,
-// bypassing the origin host-match check. The CSRF token is still validated.
-// SameSite=Strict session cookies prevent cross-origin requests from carrying
-// credentials, so the origin check is redundant for this app.
-func stripOriginMiddleware(next http.Handler) http.Handler {
+// reconcileHostMiddleware sets r.Host to match the browser-facing host before
+// gorilla/csrf runs its Origin/Referer checks. Without this the checks fail
+// whenever a reverse proxy or VPN layer (e.g. Tailscale) causes the Host
+// header seen by Go to differ from the URL the browser used.
+//
+// Priority: X-Forwarded-Host → Origin → Referer. If none carry a usable host,
+// r.Host is left unchanged. The CSRF token is still validated; SameSite=Strict
+// session cookies prevent cross-origin requests from carrying credentials.
+func reconcileHostMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r = r.Clone(r.Context())
-		r.Header.Del("Origin")
+		if h := browserHost(r); h != "" && h != r.Host {
+			r = r.Clone(r.Context())
+			r.Host = h
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func browserHost(r *http.Request) string {
+	if h := strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Host"), ",", 2)[0]); h != "" {
+		return h
+	}
+	for _, hdr := range []string{"Origin", "Referer"} {
+		if raw := r.Header.Get(hdr); raw != "" && raw != "null" {
+			if u, err := url.Parse(raw); err == nil && u.Host != "" {
+				return u.Host
+			}
+		}
+	}
+	return ""
 }
 
 // networkConfirmedGuard redirects any auth-group request back to
