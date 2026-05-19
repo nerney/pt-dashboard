@@ -443,7 +443,7 @@ func (h *Handler) configTrackerProwlarrAdd(w http.ResponseWriter, r *http.Reques
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
-	basePath := trackerProwlarrPath(idx)
+	basePath := trackerConfigPath(idx)
 	entry := cfg.Trackers[idx]
 	if entry.TrackerURL == "" || entry.APIKey == "" {
 		flash(w, r, basePath, "", entry.Name+": set URL and API key first.")
@@ -480,7 +480,7 @@ func (h *Handler) configTrackerProwlarrToggle(w http.ResponseWriter, r *http.Req
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
-	basePath := trackerProwlarrPath(idx)
+	basePath := trackerConfigPath(idx)
 	entry := cfg.Trackers[idx]
 	if entry.ProwlarrID == 0 {
 		flash(w, r, basePath, "", entry.Name+" is not in Prowlarr.")
@@ -520,7 +520,7 @@ func (h *Handler) configTrackerProwlarrRemove(w http.ResponseWriter, r *http.Req
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
-	basePath := trackerProwlarrPath(idx)
+	basePath := trackerConfigPath(idx)
 	entry := cfg.Trackers[idx]
 	if entry.ProwlarrID == 0 {
 		flash(w, r, basePath, "", entry.Name+" is not in Prowlarr.")
@@ -554,7 +554,7 @@ func (h *Handler) configTrackerDelete(w http.ResponseWriter, r *http.Request) {
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
-	basePath := trackerPTVConfigPath(idx)
+	basePath := trackerConfigPath(idx)
 	name := cfg.Trackers[idx].Name
 	cfg.Trackers = append(cfg.Trackers[:idx], cfg.Trackers[idx+1:]...)
 	if err := h.store.Save(cfg); err != nil {

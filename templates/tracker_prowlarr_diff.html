@@ -1,7 +1,7 @@
 {{ define "content" }}
 <header class="site-header">
   <div class="header-brand">
-    <a href="/tracker/{{ .TrackerIdx }}/config/prowlarr" class="brand-link">
+    <a href="/tracker/{{ .TrackerIdx }}/config" class="brand-link">
       <span class="brand-back">←</span>
       <img src="/static/icon.png" alt="" class="brand-icon">
       <span class="brand-mark">PTV</span>
@@ -10,7 +10,14 @@
     </a>
   </div>
 </header>
-{{ template "tracker_nav" . }}
+<nav class="config-nav">
+  <a href="/" class="config-nav-back">← DASHBOARD</a>
+  <span class="config-nav-sep">/</span>
+  <a href="/tracker/{{ .TrackerIdx }}/config" class="config-nav-link">TRACKER CONFIG</a>
+  <form method="POST" action="/logout" class="inline-form config-nav-logout-form">
+    <button type="submit" class="config-nav-logout-btn">LOGOUT</button>
+  </form>
+</nav>
 <div class="page-rule"></div>
 <main class="config-main">
   {{ if .FlashError }}<div class="alert alert-error"><span class="alert-dot">●</span>{{ .FlashError }}</div>{{ end }}
@@ -45,7 +52,7 @@
     {{ end }}
     {{ end }}
     <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/prowlarr/diff" class="import-submit-row">
-      <a href="/tracker/{{ .TrackerIdx }}/config/prowlarr" class="btn-sm btn-ghost">CANCEL</a>
+      <a href="/tracker/{{ .TrackerIdx }}/config" class="btn-sm btn-ghost">CANCEL</a>
       {{ if ne .Row.State "synced" }}<button type="submit" class="btn-primary">PUSH TO PROWLARR →</button>{{ end }}
     </form>
   </section>

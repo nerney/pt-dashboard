@@ -144,12 +144,9 @@ func NewRouter(store *config.Store, syncer *defs.Syncer, autobrrSyncer *autobrrd
 		r.Get("/trackers/add", h.trackerAddPage)
 		r.Get("/tracker/{idx}/config", h.trackerConfigPage)
 		r.Post("/tracker/{idx}/config", h.configTrackerUpdate)
-		r.Get("/tracker/{idx}/config/ptv", h.trackerPTVConfigPage)
-		r.Get("/tracker/{idx}/config/prowlarr", h.configTrackerProwlarrPage)
 		r.Post("/tracker/{idx}/config/prowlarr", h.configTrackerProwlarrPost)
 		r.Get("/tracker/{idx}/config/prowlarr/diff", h.trackerProwlarrDiffPage)
 		r.Post("/tracker/{idx}/config/prowlarr/diff", h.trackerProwlarrDiffPush)
-		r.Get("/tracker/{idx}/config/autobrr", h.trackerAutobrrConfigPage)
 		r.Post("/tracker/{idx}/config/autobrr", h.trackerAutobrrConfigPost)
 		r.Post("/trackers/add", h.configAdd)
 		r.Post("/tracker/{idx}/config/ptv", h.configTrackerUpdate)
@@ -163,7 +160,6 @@ func NewRouter(store *config.Store, syncer *defs.Syncer, autobrrSyncer *autobrrd
 		r.Post("/config/tracker/{idx}/prowlarr/add", h.configTrackerProwlarrAdd)
 		r.Post("/config/tracker/{idx}/prowlarr/toggle", h.configTrackerProwlarrToggle)
 		r.Post("/config/tracker/{idx}/prowlarr/remove", h.configTrackerProwlarrRemove)
-		r.Get("/config/tracker/{idx}/prowlarr", h.configTrackerProwlarrPage)
 		r.Post("/config/tracker/{idx}/prowlarr", h.configTrackerProwlarrPost)
 		r.Post("/config/tracker/{idx}/autobrr/add", h.configTrackerAutobrrAdd)
 		r.Post("/config/tracker/{idx}/autobrr/toggle", h.configTrackerAutobrrToggle)
@@ -390,7 +386,6 @@ func (h *Handler) parseTemplates() map[string]*template.Template {
 		configNav   = "templates/partials/config_nav.html"
 		prowlarrNav = "templates/partials/prowlarr_nav.html"
 		autobrrNav  = "templates/partials/autobrr_nav.html"
-		trackerNav  = "templates/partials/tracker_nav.html"
 	)
 
 	parse := func(rootName string, files ...string) *template.Template {
@@ -406,9 +401,7 @@ func (h *Handler) parseTemplates() map[string]*template.Template {
 		"config_landing":         parse("layout", layout, "templates/config_landing.html"),
 		"integrations":           parse("layout", layout, configNav, "templates/integrations.html"),
 		"tracker_add":            parse("layout", layout, configNav, "templates/tracker_add.html"),
-		"tracker_ptv_config":     parse("layout", layout, trackerNav, "templates/tracker_ptv_config.html"),
 		"tracker_config_unified": parse("layout", layout, "templates/tracker_config_unified.html"),
-		"tracker_autobrr_config": parse("layout", layout, trackerNav, "templates/tracker_autobrr_config.html"),
 		"config_trackers":        parse("layout", layout, configNav, "templates/config_trackers.html"),
 		"config_prowlarr":        parse("layout", layout, configNav, prowlarrNav, "templates/config_prowlarr.html"),
 		"config_autobrr":         parse("layout", layout, configNav, autobrrNav, "templates/config_autobrr.html"),
@@ -417,8 +410,7 @@ func (h *Handler) parseTemplates() map[string]*template.Template {
 		"autobrr_import":         parse("layout", layout, configNav, autobrrNav, "templates/autobrr_import.html"),
 		"prowlarr_sync":          parse("layout", layout, configNav, prowlarrNav, "templates/prowlarr_sync.html"),
 		"autobrr_sync":           parse("layout", layout, "templates/autobrr_sync.html"),
-		"tracker_prowlarr":       parse("layout", layout, trackerNav, "templates/tracker_prowlarr.html"),
-		"tracker_prowlarr_diff":  parse("layout", layout, trackerNav, "templates/tracker_prowlarr_diff.html"),
+		"tracker_prowlarr_diff":  parse("layout", layout, "templates/tracker_prowlarr_diff.html"),
 		"tracker_cards":          parse("tracker_cards", "templates/partials/tracker_cards.html", card),
 		"tracker_card":           parse("tracker_card", card),
 	}
