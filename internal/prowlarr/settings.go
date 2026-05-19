@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"html"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
+
+	sharedsettings "github.com/nerney/ptv/internal/settings"
 )
 
-const ExistingSecretValue = "__ptv_existing_secret__"
+const ExistingSecretValue = sharedsettings.ExistingSecretValue
 
 const DefaultIndexerPriority = 25
 
@@ -59,28 +60,7 @@ func SettingsFromFields(schema IndexerSchema, fields []SchemaField) map[string]s
 // form values to existing settings. Unknown existing/submitted keys are
 // dropped. Blank secret submissions preserve the existing saved value.
 func MergeSettings(schema IndexerSchema, existing, submitted map[string]string) map[string]string {
-	out := make(map[string]string, len(schema.Fields))
-	for _, f := range schema.Fields {
-		current, hasCurrent := existing[f.Name]
-		if !hasCurrent && hasRealDefault(f.Value) {
-			current = valueString(f.Value)
-			hasCurrent = true
-		}
-
-		next, submittedField := submitted[f.Name]
-		if submittedField {
-			if IsSecretField(f) && (next == "" || next == ExistingSecretValue) && hasCurrent {
-				out[f.Name] = current
-				continue
-			}
-			out[f.Name] = next
-			continue
-		}
-		if hasCurrent {
-			out[f.Name] = current
-		}
-	}
-	return out
+	return sharedsettings.Merge(settingsFields(schema), existing, submitted)
 }
 
 // FieldsForPayload overlays settings onto schema fields for create/update
@@ -200,42 +180,28 @@ func WithCoreCredentials(schema IndexerSchema, settings map[string]string, track
 
 // RenderFields returns all schema fields with values safe for frontend use.
 func RenderFields(schema IndexerSchema, settings map[string]string) []SettingField {
-	out := make([]SettingField, 0, len(schema.Fields))
-	for _, f := range schema.Fields {
-		if IsURLField(f) || IsDefinitionFileField(f) {
-			continue
+	rendered := sharedsettings.Render(settingsFields(schema), settings)
+	out := make([]SettingField, 0, len(rendered))
+	for _, r := range rendered {
+		options := make([]SettingOption, 0, len(r.SelectOptions))
+		for _, opt := range r.SelectOptions {
+			options = append(options, SettingOption{Name: opt.Name, Value: opt.Value, Hint: opt.Hint})
 		}
-		v, ok := settings[f.Name]
-		if !ok && hasRealDefault(f.Value) {
-			v = valueString(f.Value)
-			ok = true
-		}
-		secret := IsSecretField(f)
-		info := IsInfoField(f)
-		r := SettingField{
-			Name:          f.Name,
-			Label:         f.Label,
-			HelpText:      displayHelpText(f),
-			HelpLink:      f.HelpLink,
-			Placeholder:   f.Placeholder,
-			Type:          f.Type,
-			HasValue:      ok && v != "",
-			Secret:        secret,
-			Info:          info,
-			Required:      f.Required,
-			Advanced:      f.Advanced,
-			SelectOptions: renderOptions(f.SelectOptions),
-		}
-		if info {
-			if r.HelpText == "" {
-				r.HelpText = plainHelpText(v)
-			}
-		} else if !secret {
-			r.Value = v
-		} else if r.HasValue {
-			r.Value = ExistingSecretValue
-		}
-		out = append(out, r)
+		out = append(out, SettingField{
+			Name:          r.Name,
+			Label:         r.Label,
+			HelpText:      r.HelpText,
+			HelpLink:      r.HelpLink,
+			Placeholder:   r.Placeholder,
+			Type:          r.Type,
+			Value:         r.Value,
+			HasValue:      r.HasValue,
+			Secret:        r.Secret,
+			Info:          r.Info,
+			Required:      r.Required,
+			Advanced:      r.Advanced,
+			SelectOptions: options,
+		})
 	}
 	return out
 }
@@ -278,13 +244,37 @@ func plainHelpText(s string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(b.String())), " ")
 }
 
-func renderOptions(in []SelectOption) []SettingOption {
-	out := make([]SettingOption, 0, len(in))
-	for _, opt := range in {
-		out = append(out, SettingOption{
-			Name:  opt.Name,
-			Value: valueString(opt.Value),
-			Hint:  opt.Hint,
+func settingsFields(schema IndexerSchema) []sharedsettings.Field {
+	out := make([]sharedsettings.Field, 0, len(schema.Fields))
+	for _, f := range schema.Fields {
+		options := make([]sharedsettings.Option, 0, len(f.SelectOptions))
+		for _, opt := range f.SelectOptions {
+			options = append(options, sharedsettings.Option{
+				Name:  opt.Name,
+				Value: valueString(opt.Value),
+				Hint:  opt.Hint,
+			})
+		}
+		hasDefault := hasRealDefault(f.Value)
+		out = append(out, sharedsettings.Field{
+			Name:          f.Name,
+			Label:         f.Label,
+			HelpText:      displayHelpText(f),
+			HelpLink:      f.HelpLink,
+			Placeholder:   f.Placeholder,
+			Type:          f.Type,
+			Default:       valueString(f.Value),
+			HasDefault:    hasDefault,
+			Secret:        IsSecretField(f),
+			Info:          IsInfoField(f),
+			Required:      f.Required,
+			Advanced:      f.Advanced,
+			URL:           IsURLField(f),
+			Number:        isNumberField(f),
+			Bool:          isBoolField(f),
+			SkipRender:    IsURLField(f) || IsDefinitionFileField(f),
+			SkipDrift:     ignoreForDrift(f),
+			SelectOptions: options,
 		})
 	}
 	return out
@@ -293,54 +283,16 @@ func renderOptions(in []SelectOption) []SettingOption {
 // SettingsEqual compares schema-backed settings maps. Unknown keys are ignored
 // and default schema values are applied before comparison.
 func SettingsEqual(schema IndexerSchema, left, right map[string]string) bool {
-	return len(DiffSettings(schema, left, right)) == 0
+	return sharedsettings.Equal(settingsFields(schema), left, right)
 }
 
 // DiffSettings returns schema field names whose normalized values differ.
 func DiffSettings(schema IndexerSchema, left, right map[string]string) []string {
-	l := MergeSettings(schema, left, nil)
-	r := MergeSettings(schema, right, nil)
-	var diff []string
-	for _, f := range schema.Fields {
-		if ignoreForDrift(f) {
-			continue
-		}
-		lv, lok := l[f.Name]
-		rv, rok := r[f.Name]
-		if comparableSettingValue(f, lv, lok) != comparableSettingValue(f, rv, rok) {
-			diff = append(diff, f.Name)
-		}
-	}
-	sort.Strings(diff)
-	return diff
+	return sharedsettings.Diff(settingsFields(schema), left, right)
 }
 
 func ignoreForDrift(f SchemaField) bool {
 	return IsDefinitionFileField(f) || IsSecretField(f) || IsInfoField(f)
-}
-
-func comparableSettingValue(f SchemaField, value string, ok bool) string {
-	if !ok {
-		value = ""
-		if hasRealDefault(f.Value) {
-			value = valueString(f.Value)
-		}
-	}
-	if isBoolField(f) {
-		if value == "" || strings.EqualFold(value, "false") || value == "0" {
-			return "false"
-		}
-		return strconv.FormatBool(value == "true" || value == "on" || value == "1")
-	}
-	if IsURLField(f) {
-		return NormalizeURL(value)
-	}
-	if isNumberField(f) {
-		if n, err := strconv.ParseFloat(value, 64); err == nil {
-			return strconv.FormatFloat(n, 'f', -1, 64)
-		}
-	}
-	return value
 }
 
 func isBoolField(f SchemaField) bool {
@@ -365,19 +317,12 @@ func isNumberField(f SchemaField) bool {
 // IsSecretField follows PTV's Prowlarr rule: required schema fields without a
 // real default are secret-like and must not be rendered back to the frontend.
 func IsSecretField(f SchemaField) bool {
-	low := strings.ToLower(f.Name)
 	return (f.Required && !hasRealDefault(f.Value)) ||
-		low == "apikey" ||
-		low == "api_key" ||
-		low == "passkey" ||
-		low == "apitoken" ||
-		strings.Contains(low, "key") ||
-		strings.Contains(low, "token")
+		sharedsettings.IsCredentialName(f.Name)
 }
 
 func IsURLField(f SchemaField) bool {
-	low := strings.ToLower(f.Name)
-	return low == "baseurl" || low == "sitelink" || strings.Contains(low, "url")
+	return sharedsettings.IsURLName(f.Name)
 }
 
 func IsDefinitionFileField(f SchemaField) bool {

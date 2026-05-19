@@ -4,9 +4,10 @@ import (
 	"strings"
 
 	"github.com/nerney/ptv/internal/autobrrdefs"
+	sharedsettings "github.com/nerney/ptv/internal/settings"
 )
 
-const ExistingSecretValue = "__ptv_existing_secret__"
+const ExistingSecretValue = sharedsettings.ExistingSecretValue
 
 // SettingsFromPairs converts Autobrr's GET response setting slice into the
 // persisted map shape used by PTV.
@@ -22,29 +23,7 @@ func SettingsFromPairs(in []Setting) map[string]string {
 // the checked-in Autobrr definition as the field contract. Unknown keys are
 // dropped only when a valid definition is available to define that contract.
 func MergeSettings(def autobrrdefs.Def, existing, submitted map[string]string) map[string]string {
-	fields := defFields(def)
-	out := make(map[string]string, len(fields))
-	for _, f := range fields {
-		current, hasCurrent := existing[f.Name]
-		if !hasCurrent && f.Default != "" {
-			current = f.Default
-			hasCurrent = true
-		}
-
-		next, submittedField := submitted[f.Name]
-		if submittedField {
-			if isSecretDefField(f) && (next == "" || next == ExistingSecretValue) && hasCurrent {
-				out[f.Name] = current
-				continue
-			}
-			out[f.Name] = next
-			continue
-		}
-		if hasCurrent {
-			out[f.Name] = current
-		}
-	}
-	return out
+	return sharedsettings.Merge(contractSettingsFields(def), existing, submitted)
 }
 
 // WithCoreCredentials overlays PTV's core tracker credential onto Autobrr
@@ -80,115 +59,73 @@ func isSecretDefField(f autobrrdefs.Setting) bool {
 	return strings.EqualFold(f.Type, "secret") || isCredentialField(f.Name)
 }
 
+func settingsFields(def autobrrdefs.Def) []sharedsettings.Field {
+	root := settingsFieldsForLayer(def.Settings, "root")
+	irc := settingsFieldsForLayer(def.IRCSettings, "irc")
+	return append(root, irc...)
+}
+
+func contractSettingsFields(def autobrrdefs.Def) []sharedsettings.Field {
+	return settingsFieldsForLayer(defFields(def), "")
+}
+
+func settingsFieldsForLayer(fields []autobrrdefs.Setting, layer string) []sharedsettings.Field {
+	out := make([]sharedsettings.Field, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, sharedsettings.Field{
+			Name:       f.Name,
+			Label:      f.Label,
+			HelpText:   f.Help,
+			Type:       f.Type,
+			Default:    f.Default,
+			HasDefault: f.Default != "",
+			Secret:     isSecretDefField(f),
+			Required:   f.Required,
+			Layer:      layer,
+			URL:        sharedsettings.IsURLName(f.Name),
+			SkipDrift:  isSecretDefField(f) || isCredentialField(f.Name),
+		})
+	}
+	return out
+}
+
 // SettingField is the sanitized view of an Autobrr schema field that the UI
 // may render. Secret values are represented by ExistingSecretValue, never by
 // the stored secret itself.
 type SettingField struct {
-	Name      string
-	Label     string
-	Help      string
-	Type      string
-	Value     string
-	HasValue  bool
-	Secret    bool
-	Required  bool
-	Layer     string // "root" or "irc"
+	Name     string
+	Label    string
+	Help     string
+	Type     string
+	Value    string
+	HasValue bool
+	Secret   bool
+	Required bool
+	Layer    string // "root" or "irc"
 }
 
 // RenderFields returns all definition fields with values safe for frontend use.
 // Settings are grouped by layer (root vs IRC) for template rendering.
 func RenderFields(def autobrrdefs.Def, settings map[string]string) []SettingField {
-	out := make([]SettingField, 0, len(def.Settings)+len(def.IRCSettings))
-
-	// Render root settings first
-	for _, f := range def.Settings {
-		v, ok := settings[f.Name]
-		if !ok && f.Default != "" {
-			v = f.Default
-			ok = true
-		}
-		secret := isSecretDefField(f)
-		r := SettingField{
-			Name:     f.Name,
-			Label:    f.Label,
-			Help:     f.Help,
-			Type:     f.Type,
-			HasValue: ok && v != "",
-			Secret:   secret,
-			Required: f.Required,
-			Layer:    "root",
-		}
-		if !secret {
-			r.Value = v
-		} else if r.HasValue {
-			r.Value = ExistingSecretValue
-		}
-		out = append(out, r)
+	rendered := sharedsettings.Render(settingsFields(def), settings)
+	out := make([]SettingField, 0, len(rendered))
+	for _, r := range rendered {
+		out = append(out, SettingField{
+			Name:     r.Name,
+			Label:    r.Label,
+			Help:     r.HelpText,
+			Type:     r.Type,
+			Value:    r.Value,
+			HasValue: r.HasValue,
+			Secret:   r.Secret,
+			Required: r.Required,
+			Layer:    r.Layer,
+		})
 	}
-
-	// Render IRC settings second
-	for _, f := range def.IRCSettings {
-		v, ok := settings[f.Name]
-		if !ok && f.Default != "" {
-			v = f.Default
-			ok = true
-		}
-		secret := isSecretDefField(f)
-		r := SettingField{
-			Name:     f.Name,
-			Label:    f.Label,
-			Help:     f.Help,
-			Type:     f.Type,
-			HasValue: ok && v != "",
-			Secret:   secret,
-			Required: f.Required,
-			Layer:    "irc",
-		}
-		if !secret {
-			r.Value = v
-		} else if r.HasValue {
-			r.Value = ExistingSecretValue
-		}
-		out = append(out, r)
-	}
-
 	return out
 }
 
 // DiffSettings returns definition field names whose normalized values differ.
 func DiffSettings(def autobrrdefs.Def, desired, actual map[string]string) []string {
-	d := MergeSettings(def, desired, nil)
-	a := MergeSettings(def, actual, nil)
-	var diff []string
-	for _, f := range defFields(def) {
-		if isSecretDefField(f) || isCredentialField(f.Name) {
-			continue
-		}
-		dv, dok := d[f.Name]
-		av, aok := a[f.Name]
-		if comparableValue(f.Type, dv, dok) != comparableValue(f.Type, av, aok) {
-			diff = append(diff, f.Name)
-		}
-	}
-	return diff
-}
-
-// comparableValue normalizes a setting value for comparison, accounting for
-// field type and the presence of the value.
-func comparableValue(fieldType, value string, hasValue bool) string {
-	if !hasValue {
-		return ""
-	}
-	// Normalize URLs: lowercase and strip trailing slashes
-	if fieldType == "text" && strings.Contains(strings.ToLower(value), "http") {
-		return strings.ToLower(strings.TrimRight(value, "/"))
-	}
-	// Normalize booleans: treat empty/false as false, everything else as-is
-	if fieldType == "checkbox" || fieldType == "bool" {
-		if value == "" || strings.EqualFold(value, "false") || value == "0" {
-			return "false"
-		}
-		return "true"
-	}
-	return value
+	return sharedsettings.Diff(contractSettingsFields(def), desired, actual)
 }
