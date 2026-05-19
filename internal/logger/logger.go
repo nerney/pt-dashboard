@@ -10,6 +10,7 @@ type Level string
 
 const (
 	INFO  Level = "INFO"
+	WARN  Level = "WARN"
 	ERROR Level = "ERROR"
 )
 
@@ -25,6 +26,10 @@ func New() *Logger {
 
 func (l *Logger) Info(category, msg string) {
 	log.Printf("INFO  [%s] %s", category, msg)
+}
+
+func (l *Logger) Warn(category, msg string) {
+	log.Printf("WARN  [%s] %s", category, msg)
 }
 
 func (l *Logger) Err(category, msg string) {
