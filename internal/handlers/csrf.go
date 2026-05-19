@@ -42,7 +42,11 @@ func csrfMiddleware() func(http.Handler) http.Handler {
 			case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
 				// safe methods — no validation needed
 			default:
-				if r.FormValue(csrfFormField) != token {
+				submitted := r.FormValue(csrfFormField)
+				if submitted == "" {
+					submitted = r.Header.Get("X-CSRF-Token")
+				}
+				if submitted != token {
 					http.Error(w, "Forbidden - CSRF token invalid", http.StatusForbidden)
 					return
 				}
