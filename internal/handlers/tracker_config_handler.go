@@ -231,7 +231,7 @@ func (h *Handler) trackerAutobrrConfigPost(w http.ResponseWriter, r *http.Reques
 	autobrrCfg.Settings = autobrr.MergeSettings(*def, autobrrCfg.Settings, submitted)
 
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, trackerConfigPath(idx), "", "Save failed: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Save failed", err)
 		return
 	}
 
@@ -249,16 +249,16 @@ func (h *Handler) trackerAutobrrConfigPost(w http.ResponseWriter, r *http.Reques
 	if err := h.pushTrackerAutobrrConfig(cfg, idx, *def); err != nil {
 		cfg.Trackers[idx].EnsureAutobrr().SyncError = err.Error()
 		if saveErr := h.store.Save(cfg); saveErr != nil {
-			flash(w, r, trackerConfigPath(idx), "", "Push failed: "+err.Error()+"; save failed: "+saveErr.Error())
+			h.log.Err("CONFIG", fmt.Sprintf("Autobrr push failed for %q: %s", cfg.Trackers[idx].Name, err.Error()))
+			h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Push failed: "+err.Error()+"; save failed", saveErr)
 			return
 		}
-		h.log.Err("CONFIG", fmt.Sprintf("Autobrr push failed for %q: %s", cfg.Trackers[idx].Name, err.Error()))
-		flash(w, r, trackerConfigPath(idx), "", "Autobrr push failed: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "AUTOBRR", "Autobrr push failed", err)
 		return
 	}
 
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, trackerConfigPath(idx), "", "Push succeeded but save failed: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Push succeeded but save failed", err)
 		return
 	}
 
@@ -319,16 +319,16 @@ func (h *Handler) trackerProwlarrDiffPush(w http.ResponseWriter, r *http.Request
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	indexers, err := client.GetIndexers()
 	if err != nil {
-		flash(w, r, trackerProwlarrDiffPath(idx), "", "Failed to fetch Prowlarr indexers: "+err.Error())
+		h.flashError(w, r, trackerProwlarrDiffPath(idx), "PROWLARR", "Failed to fetch Prowlarr indexers", err)
 		return
 	}
 	action, err := h.pushTrackerToProwlarr(cfg, idx, client, indexersByID(indexers))
 	if err != nil {
-		flash(w, r, trackerProwlarrDiffPath(idx), "", "Prowlarr push failed: "+err.Error())
+		h.flashError(w, r, trackerProwlarrDiffPath(idx), "PROWLARR", "Prowlarr push failed", err)
 		return
 	}
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, trackerProwlarrDiffPath(idx), "", "Save failed: "+err.Error())
+		h.flashError(w, r, trackerProwlarrDiffPath(idx), "CONFIG", "Save failed", err)
 		return
 	}
 	flash(w, r, trackerConfigPath(idx), fmt.Sprintf("Prowlarr %s.", action), "")

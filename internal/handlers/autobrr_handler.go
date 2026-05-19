@@ -75,8 +75,7 @@ func (h *Handler) configAutobrrPost(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("CONFIG", "Saving Autobrr settings — testing connection")
 	client := autobrr.New(autobrrURL, apiKey, h.log)
 	if err := client.Ping(); err != nil {
-		h.log.Err("CONFIG", "Autobrr ping failed: "+err.Error())
-		flash(w, r, pathConfigAutobrr, "", "Cannot reach Autobrr: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Cannot reach Autobrr", err)
 		return
 	}
 
@@ -84,7 +83,7 @@ func (h *Handler) configAutobrrPost(w http.ResponseWriter, r *http.Request) {
 	cfg.AutobrrAPIKey = apiKey
 	cfg.AutobrrEnabled = true
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigAutobrr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Autobrr settings saved")
@@ -97,7 +96,7 @@ func (h *Handler) configAutobrrEnable(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	cfg.AutobrrEnabled = true
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigAutobrr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Autobrr integration enabled")
@@ -108,7 +107,7 @@ func (h *Handler) configAutobrrDisable(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	cfg.AutobrrEnabled = false
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigAutobrr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Autobrr integration disabled (credentials preserved)")
@@ -144,7 +143,7 @@ func (h *Handler) configTrackerAutobrrAdd(w http.ResponseWriter, r *http.Request
 	// rather than creating a duplicate.
 	existing, err := client.IndexerByURL(entry.TrackerURL)
 	if err != nil {
-		flash(w, r, basePath, "", "Autobrr indexer lookup failed: "+err.Error())
+		h.flashError(w, r, basePath, "AUTOBRR", "Autobrr indexer lookup failed", err)
 		return
 	}
 
@@ -158,7 +157,7 @@ func (h *Handler) configTrackerAutobrrAdd(w http.ResponseWriter, r *http.Request
 	} else {
 		schema, err := client.SchemaForURL(entry.TrackerURL)
 		if err != nil {
-			flash(w, r, basePath, "", "Autobrr schema lookup failed: "+err.Error())
+			h.flashError(w, r, basePath, "AUTOBRR", "Autobrr schema lookup failed", err)
 			return
 		}
 		settings := h.autobrrSettingsForNew(entry, *schema)
@@ -169,7 +168,7 @@ func (h *Handler) configTrackerAutobrrAdd(w http.ResponseWriter, r *http.Request
 			added, err = client.AddIndexer(*schema, entry.TrackerURL, entry.APIKey)
 		}
 		if err != nil {
-			flash(w, r, basePath, "", "Autobrr add failed: "+err.Error())
+			h.flashError(w, r, basePath, "AUTOBRR", "Autobrr add failed", err)
 			return
 		}
 		linked = added
@@ -188,7 +187,7 @@ func (h *Handler) configTrackerAutobrrAdd(w http.ResponseWriter, r *http.Request
 	autobrrCfg.Enabled = linked.Enabled
 	autobrrCfg.Settings = linkedSettings
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("%s %q in Autobrr (id=%d)", action, entry.Name, linked.ID))
@@ -212,13 +211,13 @@ func (h *Handler) configTrackerAutobrrToggle(w http.ResponseWriter, r *http.Requ
 
 	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
 	if err := client.SetEnabled(int64(entry.AutobrrID()), !entry.AutobrrEnabled()); err != nil {
-		flash(w, r, basePath, "", "Autobrr update failed: "+err.Error())
+		h.flashError(w, r, basePath, "AUTOBRR", "Autobrr update failed", err)
 		return
 	}
 
 	cfg.Trackers[idx].EnsureAutobrr().Enabled = !entry.AutobrrEnabled()
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	status := "disabled"
@@ -245,7 +244,7 @@ func (h *Handler) configTrackerAutobrrRemove(w http.ResponseWriter, r *http.Requ
 	}
 	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
 	if err := client.DeleteIndexer(int64(entry.AutobrrID())); err != nil {
-		flash(w, r, basePath, "", "Autobrr remove failed: "+err.Error())
+		h.flashError(w, r, basePath, "AUTOBRR", "Autobrr remove failed", err)
 		return
 	}
 
@@ -254,7 +253,7 @@ func (h *Handler) configTrackerAutobrrRemove(w http.ResponseWriter, r *http.Requ
 	autobrrCfg.Identifier = ""
 	autobrrCfg.Enabled = false
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Removed %q from Autobrr", entry.Name))
@@ -335,7 +334,7 @@ func (h *Handler) importAutobrrSubmit(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := h.loadAutobrrImportable(&cfg)
 	if err != nil {
-		flash(w, r, pathAutobrrImport, "", "Autobrr fetch failed: "+err.Error())
+		h.flashError(w, r, pathAutobrrImport, "AUTOBRR", "Autobrr fetch failed", err)
 		return
 	}
 	byDef := make(map[string]autobrrImportRow, len(rows))
@@ -368,7 +367,7 @@ func (h *Handler) importAutobrrSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathAutobrrImport, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathAutobrrImport, "CONFIG", "Save failed", err)
 		return
 	}
 	flash(w, r, "/", fmt.Sprintf("Linked %d tracker(s) to Autobrr: %s.",

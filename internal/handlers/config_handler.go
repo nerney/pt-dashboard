@@ -241,8 +241,7 @@ func (h *Handler) configProwlarrPost(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("CONFIG", "Saving Prowlarr settings — testing connection")
 	client := prowlarr.New(prowlarrURL, apiKey, h.log)
 	if err := client.Ping(); err != nil {
-		h.log.Err("CONFIG", "Prowlarr ping failed: "+err.Error())
-		flash(w, r, pathConfigProwlarr, "", "Cannot reach Prowlarr: "+err.Error())
+		h.flashError(w, r, pathConfigProwlarr, "CONFIG", "Cannot reach Prowlarr", err)
 		return
 	}
 
@@ -250,7 +249,7 @@ func (h *Handler) configProwlarrPost(w http.ResponseWriter, r *http.Request) {
 	cfg.ProwlarrAPIKey = apiKey
 	cfg.ProwlarrEnabled = true
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigProwlarr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.invalidateProwlarrMetadataCache()
@@ -266,7 +265,7 @@ func (h *Handler) configProwlarrEnable(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	cfg.ProwlarrEnabled = true
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigProwlarr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Prowlarr integration enabled")
@@ -278,7 +277,7 @@ func (h *Handler) configProwlarrDisable(w http.ResponseWriter, r *http.Request) 
 	cfg := h.store.Get()
 	cfg.ProwlarrEnabled = false
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigProwlarr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Prowlarr integration disabled (credentials preserved)")
@@ -347,7 +346,7 @@ func (h *Handler) configAdd(w http.ResponseWriter, r *http.Request) {
 
 	cfg.Trackers = append(cfg.Trackers, entry)
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigTrackers, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Added %q from catalog (override=%v, validated=%v)",
@@ -427,7 +426,7 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	cfg.Trackers[idx].APIKey = effKey
 
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, trackerConfigPath(idx), "", "Save failed: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Updated tracker %q credentials (forceSave=%v)", name, forceSave))
@@ -454,19 +453,19 @@ func (h *Handler) configTrackerProwlarrAdd(w http.ResponseWriter, r *http.Reques
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	schema, err := client.SchemaByName(entry.DefinitionName)
 	if err != nil {
-		flash(w, r, basePath, "", "Schema not found in Prowlarr: "+err.Error())
+		h.flashError(w, r, basePath, "PROWLARR", "Schema not found in Prowlarr", err)
 		return
 	}
 	if entry.ProwlarrSettings() == nil {
 		cfg.Trackers[idx].EnsureProwlarr().Settings = prowlarr.MergeSettings(*schema, nil, nil)
 	}
 	if err := h.pushTrackerProwlarrConfig(cfg, idx, *schema); err != nil {
-		flash(w, r, basePath, "", "Prowlarr add failed: "+err.Error())
+		h.flashError(w, r, basePath, "PROWLARR", "Prowlarr add failed", err)
 		return
 	}
 
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Added %q to Prowlarr (id=%d)", entry.Name, cfg.Trackers[idx].ProwlarrID()))
@@ -491,17 +490,17 @@ func (h *Handler) configTrackerProwlarrToggle(w http.ResponseWriter, r *http.Req
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	indexer, err := client.GetIndexer(entry.ProwlarrID())
 	if err != nil {
-		flash(w, r, basePath, "", "Prowlarr fetch failed: "+err.Error())
+		h.flashError(w, r, basePath, "PROWLARR", "Prowlarr fetch failed", err)
 		return
 	}
 	if err := client.SetEnabled(*indexer, !entry.Enabled); err != nil {
-		flash(w, r, basePath, "", "Prowlarr update failed: "+err.Error())
+		h.flashError(w, r, basePath, "PROWLARR", "Prowlarr update failed", err)
 		return
 	}
 
 	cfg.Trackers[idx].Enabled = !entry.Enabled
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	status := "disabled"
@@ -529,7 +528,7 @@ func (h *Handler) configTrackerProwlarrRemove(w http.ResponseWriter, r *http.Req
 	}
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	if err := client.DeleteIndexer(entry.ProwlarrID()); err != nil {
-		flash(w, r, basePath, "", "Prowlarr remove failed: "+err.Error())
+		h.flashError(w, r, basePath, "PROWLARR", "Prowlarr remove failed", err)
 		return
 	}
 
@@ -540,7 +539,7 @@ func (h *Handler) configTrackerProwlarrRemove(w http.ResponseWriter, r *http.Req
 	prowlarrCfg.AppProfileID = 0
 	prowlarrCfg.Tags = nil
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Removed %q from Prowlarr", entry.Name))
@@ -560,7 +559,7 @@ func (h *Handler) configTrackerDelete(w http.ResponseWriter, r *http.Request) {
 	name := cfg.Trackers[idx].Name
 	cfg.Trackers = append(cfg.Trackers[:idx], cfg.Trackers[idx+1:]...)
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, basePath, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Deleted %q from dashboard", name))
