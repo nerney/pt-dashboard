@@ -64,74 +64,28 @@
     {{ if gt .Tracker.AutobrrID 0 }}
     <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/autobrr" class="config-form">
       {{ if .Definition }}
-      {{ $rootFields := 0 }}
-      {{ $ircFields := 0 }}
-      {{ range .Fields }}
-        {{ if eq .Layer "root" }}
-          {{ $rootFields = add $rootFields 1 }}
-        {{ else }}
-          {{ $ircFields = add $ircFields 1 }}
-        {{ end }}
-      {{ end }}
 
-      <!-- Root settings section -->
-      {{ if gt $rootFields 0 }}
-      <div class="config-row">
-        <h3 class="field-section-title">Root Settings</h3>
-      </div>
       {{ range .Fields }}
-        {{ if eq .Layer "root" }}
-        <div class="config-row autobrr-field-row">
-          <div class="field">
-            <label class="field-label">{{ .Label }}</label>
-            {{ if .Secret }}
-            <input class="field-input" type="password" name="setting_{{ .Name }}" autocomplete="off" {{ if .HasValue }}placeholder="set — enter new value to replace"{{ else }}placeholder="required"{{ end }}>
-            {{ else if eq .Type "checkbox" }}
-            <input type="hidden" name="setting_{{ .Name }}" value="false">
-            <label class="checkline">
-              <input type="checkbox" name="setting_{{ .Name }}" value="true" {{ if .Value }}checked{{ end }}>
-              <span>enabled</span>
-            </label>
-            {{ else if eq .Type "number" }}
-            <input class="field-input" type="number" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
-            {{ else }}
-            <input class="field-input" type="text" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
-            {{ end }}
-            {{ if .Help }}<p class="config-hint">{{ .Help }}</p>{{ end }}
-          </div>
+      <div class="config-row autobrr-field-row">
+        <div class="field">
+          <label class="field-label">{{ .Label }}</label>
+          {{ if .Secret }}
+          <input class="field-input" type="password" name="setting_{{ .Name }}" autocomplete="off" {{ if .HasValue }}placeholder="set — enter new value to replace"{{ else }}placeholder="required"{{ end }}>
+          {{ else if eq .Type "checkbox" }}
+          <input type="hidden" name="setting_{{ .Name }}" value="false">
+          <label class="checkline">
+            <input type="checkbox" name="setting_{{ .Name }}" value="true" {{ if .Value }}checked{{ end }}>
+            <span>enabled</span>
+          </label>
+          {{ else if eq .Type "number" }}
+          <input class="field-input" type="number" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
+          {{ else }}
+          <input class="field-input" type="text" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
+          {{ end }}
+          {{ if .Help }}<p class="config-hint">{{ .Help }}</p>{{ end }}
+          {{ if eq .Layer "irc" }}<p class="config-hint muted">IRC setting</p>{{ end }}
         </div>
-        {{ end }}
-      {{ end }}
-      {{ end }}
-
-      <!-- IRC settings section -->
-      {{ if gt $ircFields 0 }}
-      <div class="config-row">
-        <h3 class="field-section-title">IRC Settings</h3>
       </div>
-      {{ range .Fields }}
-        {{ if eq .Layer "irc" }}
-        <div class="config-row autobrr-field-row">
-          <div class="field">
-            <label class="field-label">{{ .Label }}</label>
-            {{ if .Secret }}
-            <input class="field-input" type="password" name="setting_{{ .Name }}" autocomplete="off" {{ if .HasValue }}placeholder="set — enter new value to replace"{{ else }}{{ if .Required }}placeholder="required"{{ end }}{{ end }}>
-            {{ else if eq .Type "checkbox" }}
-            <input type="hidden" name="setting_{{ .Name }}" value="false">
-            <label class="checkline">
-              <input type="checkbox" name="setting_{{ .Name }}" value="true" {{ if .Value }}checked{{ end }}>
-              <span>enabled</span>
-            </label>
-            {{ else if eq .Type "number" }}
-            <input class="field-input" type="number" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
-            {{ else }}
-            <input class="field-input" type="text" name="setting_{{ .Name }}" value="{{ .Value }}" autocomplete="off">
-            {{ end }}
-            {{ if .Help }}<p class="config-hint">{{ .Help }}</p>{{ end }}
-          </div>
-        </div>
-        {{ end }}
-      {{ end }}
       {{ end }}
 
       {{ end }}
