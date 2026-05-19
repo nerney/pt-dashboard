@@ -93,25 +93,38 @@ func (c *Client) Ping() error {
 
 // ---------- indexers ----------------------------------------------------
 
-// Setting is the {name, value} pair used in Autobrr's indexer settings array.
+// Setting is the {name, value} pair returned by Autobrr's GET responses.
 type Setting struct {
 	Name  string `json:"name"`
 	Value string `json:"value,omitempty"`
 }
 
-// Indexer represents a configured indexer in Autobrr (one tracker entry).
+// Indexer represents a configured indexer returned by GET /api/indexer.
 type Indexer struct {
 	ID             int64     `json:"id"`
 	Name           string    `json:"name"`
-	Identifier     string    `json:"identifier"`            // "alpharatio", "blutopia", …
-	IdentifierExt  string    `json:"identifier_external"`   // human-readable, may be empty
+	Identifier     string    `json:"identifier"`
+	IdentifierExt  string    `json:"identifier_external"`
 	Enabled        bool      `json:"enabled"`
-	Implementation string    `json:"implementation"`        // "irc", "torznab", "rss", …
+	Implementation string    `json:"implementation"`
 	BaseURL        string    `json:"base_url"`
 	Settings       []Setting `json:"settings"`
 }
 
-// IndexerSchema is one entry from Autobrr's built-in indexer catalog.
+// indexerWrite is the POST/PUT body shape. The Autobrr API expects Settings as
+// a flat map[string]string, not the []Setting slice returned by GET.
+type indexerWrite struct {
+	ID             int64             `json:"id,omitempty"`
+	Name           string            `json:"name"`
+	Identifier     string            `json:"identifier"`
+	Enabled        bool              `json:"enabled"`
+	Implementation string            `json:"implementation"`
+	BaseURL        string            `json:"base_url"`
+	Settings       map[string]string `json:"settings"`
+}
+
+// IndexerSchema is one entry from Autobrr's built-in indexer catalog
+// (GET /api/indexer/schema). Settings carry field metadata; values are empty.
 type IndexerSchema struct {
 	Identifier     string    `json:"identifier"`
 	Name           string    `json:"name"`
@@ -168,6 +181,23 @@ func (c *Client) GetSchemas() ([]IndexerSchema, error) {
 	return out, nil
 }
 
+// IndexerByURL returns the first existing Autobrr indexer whose base_url
+// matches the supplied tracker URL (normalized). Returns nil, nil when no
+// match is found — so the caller can distinguish "error" from "not found".
+func (c *Client) IndexerByURL(trackerURL string) (*Indexer, error) {
+	idxs, err := c.GetIndexers()
+	if err != nil {
+		return nil, err
+	}
+	want := NormalizeURL(trackerURL)
+	for i, idx := range idxs {
+		if NormalizeURL(idx.BaseURL) == want {
+			return &idxs[i], nil
+		}
+	}
+	return nil, nil
+}
+
 // SchemaForURL returns the first schema whose URLs include the supplied
 // tracker URL (case-insensitive, trailing slash agnostic).
 func (c *Client) SchemaForURL(trackerURL string) (*IndexerSchema, error) {
@@ -187,16 +217,23 @@ func (c *Client) SchemaForURL(trackerURL string) (*IndexerSchema, error) {
 }
 
 // AddIndexer creates a new indexer in Autobrr from the supplied schema,
-// populating its settings with the user's tracker credentials. Returns the
-// created indexer (with its assigned ID) on success.
+// populating credential fields with apiKey. Returns the created indexer on
+// success.
 func (c *Client) AddIndexer(schema IndexerSchema, trackerURL, apiKey string) (*Indexer, error) {
-	payload := Indexer{
+	return c.AddIndexerWithSettings(schema, trackerURL, settingsToMap(schema.Settings, apiKey))
+}
+
+// AddIndexerWithSettings creates a new indexer in Autobrr from the supplied
+// schema and explicit settings map. Callers that have a schema-backed desired
+// settings map should use this to preserve non-core fields.
+func (c *Client) AddIndexerWithSettings(schema IndexerSchema, trackerURL string, settings map[string]string) (*Indexer, error) {
+	payload := indexerWrite{
 		Name:           schema.Name,
 		Identifier:     schema.Identifier,
 		Enabled:        true,
 		Implementation: schema.Implementation,
 		BaseURL:        strings.TrimRight(trackerURL, "/"),
-		Settings:       populateSettings(schema.Settings, apiKey),
+		Settings:       settings,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -217,10 +254,34 @@ func (c *Client) AddIndexer(schema IndexerSchema, trackerURL, apiKey string) (*I
 }
 
 // UpdateIndexer pushes refreshed credentials into an existing Autobrr indexer.
+// It converts the existing []Setting slice (from a prior GET) into the
+// map[string]string the PUT body requires, overwriting credential fields.
 func (c *Client) UpdateIndexer(existing Indexer, trackerURL, apiKey string) (*Indexer, error) {
-	existing.BaseURL = strings.TrimRight(trackerURL, "/")
-	existing.Settings = populateSettings(existing.Settings, apiKey)
-	data, err := json.Marshal(existing)
+	settings := make(map[string]string, len(existing.Settings))
+	for _, s := range existing.Settings {
+		settings[s.Name] = s.Value
+	}
+	for k := range settings {
+		if isCredentialField(k) {
+			settings[k] = apiKey
+		}
+	}
+	return c.UpdateIndexerWithSettings(existing, trackerURL, settings)
+}
+
+// UpdateIndexerWithSettings pushes an explicit settings map into an existing
+// Autobrr indexer while preserving its identity and enabled state.
+func (c *Client) UpdateIndexerWithSettings(existing Indexer, trackerURL string, settings map[string]string) (*Indexer, error) {
+	payload := indexerWrite{
+		ID:             existing.ID,
+		Name:           existing.Name,
+		Identifier:     existing.Identifier,
+		Enabled:        existing.Enabled,
+		Implementation: existing.Implementation,
+		BaseURL:        strings.TrimRight(trackerURL, "/"),
+		Settings:       settings,
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -234,11 +295,12 @@ func (c *Client) UpdateIndexer(existing Indexer, trackerURL, apiKey string) (*In
 		return nil, fmt.Errorf("autobrr HTTP %d: %s", resp.StatusCode, string(body))
 	}
 	if len(body) == 0 {
+		existing.BaseURL = strings.TrimRight(trackerURL, "/")
 		return &existing, nil
 	}
 	var updated Indexer
 	if err := json.Unmarshal(body, &updated); err != nil {
-		// Some Autobrr versions return empty body on PUT — treat as success.
+		existing.BaseURL = strings.TrimRight(trackerURL, "/")
 		return &existing, nil
 	}
 	return &updated, nil
@@ -321,31 +383,34 @@ func NormalizeURL(u string) string {
 	return strings.TrimRight(strings.ToLower(strings.TrimSpace(u)), "/")
 }
 
-// populateSettings fills credential-shaped setting fields with the supplied
-// API key. Autobrr definitions name these fields differently per tracker
-// ("api_key", "authkey", "torrent_pass", "passkey", "rsskey", …) so we
-// substitute everything that looks like a key/token slot.
+// settingsToMap converts a []Setting slice (from schema/GET responses) into the
+// map[string]string that the Autobrr POST/PUT body expects. Fields that look
+// like credential slots are populated with apiKey; others keep their existing
+// value (or are set to empty string if none).
 //
 // PTV stores ONE credential per tracker (the UNIT3D API key). Trackers that
-// require multiple separate Autobrr secrets (auth + torrent_pass + irc key
-// for non-UNIT3D software) won't be fully populated by this and would need
-// to be finished in the Autobrr UI.
-func populateSettings(in []Setting, apiKey string) []Setting {
-	out := make([]Setting, len(in))
-	copy(out, in)
-	for i, s := range out {
-		low := strings.ToLower(s.Name)
-		switch {
-		case strings.Contains(low, "api_key"),
-			strings.Contains(low, "apikey"),
-			strings.Contains(low, "api-key"),
-			strings.Contains(low, "rsskey"),
-			low == "key",
-			low == "token":
-			out[i].Value = apiKey
+// require multiple separate Autobrr secrets won't be fully populated and will
+// need to be finished in the Autobrr UI.
+func settingsToMap(in []Setting, apiKey string) map[string]string {
+	out := make(map[string]string, len(in))
+	for _, s := range in {
+		if isCredentialField(s.Name) {
+			out[s.Name] = apiKey
+		} else {
+			out[s.Name] = s.Value
 		}
 	}
 	return out
+}
+
+func isCredentialField(name string) bool {
+	low := strings.ToLower(name)
+	return strings.Contains(low, "api_key") ||
+		strings.Contains(low, "apikey") ||
+		strings.Contains(low, "api-key") ||
+		strings.Contains(low, "rsskey") ||
+		low == "key" ||
+		low == "token"
 }
 
 // MatchNetwork picks the IRC network whose name best matches the supplied

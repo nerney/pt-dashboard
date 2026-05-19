@@ -2,6 +2,7 @@
 <header class="site-header">
   <div class="header-brand">
     <a href="/" class="brand-link">
+      <img src="/static/icon.png" alt="" class="brand-icon">
       <span class="brand-mark">PTV</span>
       <span class="brand-sep">—</span>
       <span class="brand-sub">NETWORK</span>
@@ -40,7 +41,8 @@
       Add any subnet you want to permit (e.g. <code>192.168.0.0/16</code> for LAN access).
     </p>
 
-    <form method="POST" action="/config/network" class="config-form">
+    <form method="POST" action="/config/app/network" class="config-form">
+    {{ $.CSRFField }}
       <div class="field">
         <label class="field-label">ALLOWED CIDRS</label>
         <textarea class="field-input field-textarea" name="cidrs" rows="5"

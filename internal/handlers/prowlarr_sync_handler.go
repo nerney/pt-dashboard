@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nerney/ptv/internal/config"
 	"github.com/nerney/ptv/internal/prowlarr"
@@ -16,7 +17,7 @@ import (
 // this page pushes its configured trackers into Prowlarr (creates
 // missing ones, updates drifted ones, leaves synced ones alone).
 
-const pathProwlarrSync = "/config/prowlarr/sync"
+const pathProwlarrSync = "/sync/prowlarr"
 
 // syncState classifies each managed tracker for the comparison view.
 type syncState string
@@ -36,6 +37,8 @@ type prowlarrSyncRow struct {
 	State          syncState
 	ProwlarrURL    string // Prowlarr's current value (relevant on drift)
 	ProwlarrHasKey bool   // whether Prowlarr has an API key set
+	DiffFields     []string
+	SchemaError    string
 }
 
 type prowlarrSyncData struct {
@@ -61,12 +64,12 @@ func (h *Handler) prowlarrSyncPage(w http.ResponseWriter, r *http.Request) {
 		FlashError:   r.URL.Query().Get("err"),
 		FlashSuccess: r.URL.Query().Get("ok"),
 		ActiveTab:    "sync",
-		Section:      "prowlarr",
+		Section:      "",
 	}
 	data.ProwlarrEnabled = cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != ""
 
 	if !data.ProwlarrEnabled {
-		h.render(w, "prowlarr_sync", data)
+		h.render(w, r, "prowlarr_sync", data)
 		return
 	}
 
@@ -74,13 +77,13 @@ func (h *Handler) prowlarrSyncPage(w http.ResponseWriter, r *http.Request) {
 	prowlarrIndexers, err := client.GetIndexers()
 	if err != nil {
 		data.LoadError = "Failed to fetch Prowlarr indexers: " + err.Error()
-		h.render(w, "prowlarr_sync", data)
+		h.render(w, r, "prowlarr_sync", data)
 		return
 	}
 
 	byID := indexersByID(prowlarrIndexers)
 	for i, t := range cfg.Trackers {
-		row := classifyTracker(i, t, byID)
+		row := h.classifyTracker(i, t, byID)
 		switch row.State {
 		case syncNew:
 			data.New = append(data.New, row)
@@ -93,7 +96,7 @@ func (h *Handler) prowlarrSyncPage(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("CONFIG", fmt.Sprintf("Prowlarr sync state: %d synced, %d new, %d drift",
 		len(data.Synced), len(data.New), len(data.Drift)))
-	h.render(w, "prowlarr_sync", data)
+	h.render(w, r, "prowlarr_sync", data)
 }
 
 // indexersByID indexes the Prowlarr list by ID so classifyTracker can
@@ -109,27 +112,44 @@ func indexersByID(idxs []prowlarr.Indexer) map[int]prowlarr.Indexer {
 // classifyTracker decides which sync bucket a tracker belongs to. A
 // stored ProwlarrID that no longer exists in Prowlarr is treated as
 // "new" — the next push will recreate it and overwrite the stale ID.
-func classifyTracker(i int, t *config.TrackerEntry, byID map[int]prowlarr.Indexer) prowlarrSyncRow {
+func (h *Handler) classifyTracker(i int, t *config.TrackerEntry, byID map[int]prowlarr.Indexer) prowlarrSyncRow {
 	row := prowlarrSyncRow{
 		TrackerIdx: i,
 		Name:       t.Name,
 		TrackerURL: t.TrackerURL,
-		ProwlarrID: t.ProwlarrID,
+		ProwlarrID: t.ProwlarrID(),
 	}
-	if t.ProwlarrID == 0 {
+	if t.ProwlarrID() == 0 {
 		row.State = syncNew
 		return row
 	}
-	idx, exists := byID[t.ProwlarrID]
+	idx, exists := byID[t.ProwlarrID()]
 	if !exists {
 		row.State = syncNew
 		return row
 	}
 	pURL, pKey := prowlarr.ExtractCreds(idx.Fields)
+	if pURL == "" && len(idx.IndexerUrls) > 0 {
+		pURL = idx.IndexerUrls[0]
+	}
 	row.ProwlarrURL = pURL
 	row.ProwlarrHasKey = pKey != ""
-	if prowlarr.NormalizeURL(pURL) != prowlarr.NormalizeURL(t.TrackerURL) || pKey != t.APIKey {
+	schema, err := h.prowlarrSchemaByName(t.DefinitionName)
+	if err != nil {
 		row.State = syncDrift
+		row.SchemaError = err.Error()
+		return row
+	}
+	desired := prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings(), t.TrackerURL, t.APIKey)
+	actual := prowlarr.SettingsFromFields(*schema, idx.Fields)
+	root := h.desiredProwlarrRootForCompare(t, *schema)
+	actualRoot := prowlarr.RootConfigFromIndexer(idx)
+	if !prowlarr.SettingsEqual(*schema, desired, actual) {
+		row.State = syncDrift
+		row.DiffFields = prowlarr.DiffSettings(*schema, desired, actual)
+	} else if !prowlarr.RootConfigsEqual(root, actualRoot) {
+		row.State = syncDrift
+		row.DiffFields = prowlarr.DiffRootConfig(root, actualRoot)
 	} else {
 		row.State = syncSynced
 	}
@@ -167,7 +187,7 @@ func (h *Handler) prowlarrSyncSubmit(w http.ResponseWriter, r *http.Request) {
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	prowlarrIndexers, err := client.GetIndexers()
 	if err != nil {
-		flash(w, r, pathProwlarrSync, "", "Failed to fetch Prowlarr indexers: "+err.Error())
+		h.flashError(w, r, pathProwlarrSync, "PROWLARR", "Failed to fetch Prowlarr indexers", err)
 		return
 	}
 	byID := indexersByID(prowlarrIndexers)
@@ -175,7 +195,7 @@ func (h *Handler) prowlarrSyncSubmit(w http.ResponseWriter, r *http.Request) {
 	pushed, failures, dirty := h.runSyncPush(&cfg, client, byID, idxStrs)
 	if dirty {
 		if err := h.store.Save(&cfg); err != nil {
-			flash(w, r, pathProwlarrSync, "", "Save failed: "+err.Error())
+			h.flashError(w, r, pathProwlarrSync, "CONFIG", "Save failed", err)
 			return
 		}
 	}
@@ -226,33 +246,81 @@ func (h *Handler) pushTrackerToProwlarr(
 	byID map[int]prowlarr.Indexer,
 ) (action string, err error) {
 	t := cfg.Trackers[i]
+	schema, sErr := h.prowlarrSchemaByName(t.DefinitionName)
+	if sErr != nil {
+		return "pushed", fmt.Errorf("schema lookup: %w", sErr)
+	}
+	settings := prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings(), t.TrackerURL, t.APIKey)
+	fields := prowlarr.FieldsForPayload(*schema, settings)
+	root, rootErr := h.prowlarrRootConfig(cfg, i, *schema, client)
+	if rootErr != nil {
+		return "pushed", rootErr
+	}
 
 	// Update path: dashboard has a Prowlarr ID AND Prowlarr still has it.
-	if t.ProwlarrID != 0 {
-		if existing, ok := byID[t.ProwlarrID]; ok {
-			updated, uErr := client.UpdateIndexer(existing, t.TrackerURL, t.APIKey)
+	if t.ProwlarrID() != 0 {
+		if existing, ok := byID[t.ProwlarrID()]; ok {
+			updated, uErr := client.UpdateIndexerWithRoot(existing, fields, root)
+			if uErr != nil {
+				return "updated", uErr
+			}
+			updated, uErr = h.ensureProwlarrEnabled(client, updated, root.Enable)
 			if uErr != nil {
 				return "updated", uErr
 			}
 			cfg.Trackers[i].Enabled = updated.Enable
+			prowlarrCfg := cfg.Trackers[i].EnsureProwlarr()
+			prowlarrCfg.Name = prowlarr.BaseIndexerName(updated.Name)
+			prowlarrCfg.AppProfileID = updated.AppProfileID
+			prowlarrCfg.Tags = append([]int(nil), updated.Tags...)
+			returned := prowlarr.SettingsFromFields(*schema, updated.Fields)
+			prowlarrCfg.Settings = prowlarr.MergeSettings(*schema, settings, returned)
+			now := time.Now()
+			prowlarrCfg.LastSync = &now
+			prowlarrCfg.SyncError = ""
 			return "updated", nil
 		}
 		// Stale ID → fall through to create.
 	}
 
-	// Create path. Look up the schema (so AddIndexer can populate
-	// implementation-specific defaults) and post the new indexer.
-	schema, sErr := client.SchemaByName(t.DefinitionName)
-	if sErr != nil {
-		return "created", fmt.Errorf("schema lookup: %w", sErr)
+	appProfileID := schema.AppProfileID
+	if appProfileID <= 0 {
+		var pErr error
+		appProfileID, pErr = client.FirstAppProfileID()
+		if pErr != nil {
+			return "created", pErr
+		}
 	}
-	added, aErr := client.AddIndexer(*schema, t.TrackerURL, t.APIKey)
+	payloadSchema := prowlarr.IndexerSchemaForPayload(*schema, appProfileID)
+	root.AppProfileID = appProfileID
+	added, aErr := client.AddIndexerWithRoot(payloadSchema, fields, root)
 	if aErr != nil {
 		return "created", aErr
 	}
-	cfg.Trackers[i].ProwlarrID = added.ID
+	added, aErr = h.ensureProwlarrEnabled(client, added, root.Enable)
+	if aErr != nil {
+		return "created", aErr
+	}
 	cfg.Trackers[i].Enabled = added.Enable
+	prowlarrCfg := cfg.Trackers[i].EnsureProwlarr()
+	prowlarrCfg.ID = added.ID
+	prowlarrCfg.Name = prowlarr.BaseIndexerName(added.Name)
+	prowlarrCfg.AppProfileID = added.AppProfileID
+	prowlarrCfg.Tags = append([]int(nil), added.Tags...)
+	returned := prowlarr.SettingsFromFields(*schema, added.Fields)
+	prowlarrCfg.Settings = prowlarr.MergeSettings(*schema, settings, returned)
+	now := time.Now()
+	prowlarrCfg.LastSync = &now
+	prowlarrCfg.SyncError = ""
 	return "created", nil
+}
+
+func (h *Handler) desiredProwlarrRootForCompare(t *config.TrackerEntry, schema prowlarr.IndexerSchema) prowlarr.IndexerRootConfig {
+	appProfileID := t.ProwlarrAppProfileID()
+	if appProfileID <= 0 {
+		appProfileID = schema.AppProfileID
+	}
+	return prowlarr.RootConfig(prowlarrBaseName(t), t.Enabled, appProfileID, t.ProwlarrTags())
 }
 
 // flashSyncResult mirrors flashImportResult — same three-way redirect
@@ -273,5 +341,5 @@ func flashSyncResult(w http.ResponseWriter, r *http.Request, pushed, failures []
 		q.Set("ok", okMsg)
 	}
 	q.Set("err", errMsg)
-	http.Redirect(w, r, "/?" +q.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, "/?"+q.Encode(), http.StatusSeeOther)
 }

@@ -20,7 +20,7 @@ import (
 // flags that row in the redirect-to-home flash. This matches the spec:
 // "imported with empty stats" is a valid state.
 
-const pathImport = "/config/prowlarr/import"
+const pathImport = "/config/integrations/prowlarr/import"
 
 type importPageData struct {
 	ProwlarrEnabled bool
@@ -41,18 +41,18 @@ func (h *Handler) importPage(w http.ResponseWriter, r *http.Request) {
 		FlashError:   r.URL.Query().Get("err"),
 		FlashSuccess: r.URL.Query().Get("ok"),
 		ActiveTab:    "import",
-		Section:      "prowlarr",
+		Section:      "integrations",
 	}
 	data.ProwlarrEnabled = cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != ""
 
 	if !data.ProwlarrEnabled {
-		h.render(w, "import", data)
+		h.render(w, r, "import", data)
 		return
 	}
 
 	if st, _ := h.syncer.Status(); st == defs.StateUnavailable {
 		data.LoadError = "Indexer definitions unavailable — try again shortly."
-		h.render(w, "import", data)
+		h.render(w, r, "import", data)
 		return
 	}
 
@@ -60,12 +60,12 @@ func (h *Handler) importPage(w http.ResponseWriter, r *http.Request) {
 	importable, err := h.loadImportable(client, &cfg)
 	if err != nil {
 		data.LoadError = err.Error()
-		h.render(w, "import", data)
+		h.render(w, r, "import", data)
 		return
 	}
 	data.ProwlarrOK = true
 	data.Importable = importable
-	h.render(w, "import", data)
+	h.render(w, r, "import", data)
 }
 
 // importSubmit imports every selected Prowlarr indexer. Validation
@@ -94,7 +94,7 @@ func (h *Handler) importSubmit(w http.ResponseWriter, r *http.Request) {
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	urlMap, typeMap, err := h.catalogMaps()
 	if err != nil {
-		flash(w, r, pathImport, "", "Catalog unavailable: "+err.Error())
+		h.flashError(w, r, pathImport, "IMPORT", "Catalog unavailable", err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *Handler) importSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if len(result.imported) > 0 {
 		if err := h.store.Save(&cfg); err != nil {
-			flash(w, r, pathImport, "", "Save failed: "+err.Error())
+			h.flashError(w, r, pathImport, "CONFIG", "Save failed", err)
 			return
 		}
 	}
@@ -168,6 +168,13 @@ func (h *Handler) runImport(
 			}
 			continue
 		}
+		schema, sErr := h.prowlarrSchemaByName(entry.DefinitionName)
+		if sErr != nil {
+			out.unvalidated = append(out.unvalidated, idx.Name+" (schema unavailable)")
+			h.log.Err("CONFIG", fmt.Sprintf("Prowlarr import schema failed for %q: %s", idx.Name, sErr.Error()))
+			continue
+		}
+		entry.EnsureProwlarr().Settings = prowlarr.SettingsFromFields(*schema, idx.Fields)
 
 		// Validate against the tracker API. Failure doesn't block the import —
 		// the row lands with empty stats per spec.
@@ -214,6 +221,9 @@ func (h *Handler) buildImportEntry(
 	already map[string]bool,
 ) (*config.TrackerEntry, string) {
 	idxURL, key := prowlarr.ExtractCreds(idx.Fields)
+	if idxURL == "" && len(idx.IndexerUrls) > 0 {
+		idxURL = idx.IndexerUrls[0]
+	}
 	schemaName := urlMap[prowlarr.NormalizeURL(idxURL)]
 	if schemaName == "" {
 		return nil, skipURLNotCatalog
@@ -227,8 +237,13 @@ func (h *Handler) buildImportEntry(
 		Name:           idx.Name,
 		TrackerURL:     idxURL,
 		APIKey:         key,
-		ProwlarrID:     idx.ID,
 		Enabled:        idx.Enable,
+		Prowlarr: &config.ProwlarrTrackerConfig{
+			ID:           idx.ID,
+			Name:         prowlarr.BaseIndexerName(idx.Name),
+			AppProfileID: idx.AppProfileID,
+			Tags:         append([]int(nil), idx.Tags...),
+		},
 	}, ""
 }
 

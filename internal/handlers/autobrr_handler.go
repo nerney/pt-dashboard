@@ -3,10 +3,10 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/nerney/ptv/internal/autobrr"
+	"github.com/nerney/ptv/internal/autobrrdefs"
 	"github.com/nerney/ptv/internal/config"
 )
 
@@ -18,8 +18,8 @@ import (
 // not manage filters, releases, IRC networks, or any other Autobrr feature.
 
 const (
-	pathConfigAutobrr = "/config/autobrr"
-	pathAutobrrImport = "/config/autobrr/import"
+	pathConfigAutobrr = "/config/integrations/autobrr"
+	pathAutobrrImport = "/config/integrations/autobrr/import"
 )
 
 // ── settings page ──────────────────────────────────────────────────
@@ -39,12 +39,12 @@ func (h *Handler) configAutobrrPage(w http.ResponseWriter, r *http.Request) {
 	if cfg.AutobrrURL == "" {
 		cfg.AutobrrURL = "http://autobrr:7474"
 	}
-	h.render(w, "config_autobrr", configAutobrrData{
+	h.render(w, r, "config_autobrr", configAutobrrData{
 		Config:       cfg,
 		FlashError:   r.URL.Query().Get("err"),
 		FlashSuccess: r.URL.Query().Get("ok"),
 		ActiveTab:    "settings",
-		Section:      "autobrr",
+		Section:      "integrations",
 	})
 }
 
@@ -75,8 +75,7 @@ func (h *Handler) configAutobrrPost(w http.ResponseWriter, r *http.Request) {
 	h.log.Info("CONFIG", "Saving Autobrr settings — testing connection")
 	client := autobrr.New(autobrrURL, apiKey, h.log)
 	if err := client.Ping(); err != nil {
-		h.log.Err("CONFIG", "Autobrr ping failed: "+err.Error())
-		flash(w, r, pathConfigAutobrr, "", "Cannot reach Autobrr: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Cannot reach Autobrr", err)
 		return
 	}
 
@@ -84,7 +83,7 @@ func (h *Handler) configAutobrrPost(w http.ResponseWriter, r *http.Request) {
 	cfg.AutobrrAPIKey = apiKey
 	cfg.AutobrrEnabled = true
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigAutobrr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Autobrr settings saved")
@@ -97,7 +96,7 @@ func (h *Handler) configAutobrrEnable(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	cfg.AutobrrEnabled = true
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigAutobrr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Autobrr integration enabled")
@@ -108,7 +107,7 @@ func (h *Handler) configAutobrrDisable(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	cfg.AutobrrEnabled = false
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigAutobrr, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigAutobrr, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", "Autobrr integration disabled (credentials preserved)")
@@ -124,40 +123,75 @@ func (h *Handler) configAutobrrDisable(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) configTrackerAutobrrAdd(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
+		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
+	basePath := trackerConfigPath(idx) + "/autobrr"
 	entry := cfg.Trackers[idx]
 	if entry.TrackerURL == "" || entry.APIKey == "" {
-		flash(w, r, pathConfigTrackers, "", entry.Name+": set URL and API key first.")
+		flash(w, r, basePath, "", entry.Name+": set URL and API key first.")
 		return
 	}
 	if !cfg.AutobrrEnabled || cfg.AutobrrURL == "" || cfg.AutobrrAPIKey == "" {
-		flash(w, r, pathConfigTrackers, "", "Autobrr integration is not configured.")
+		flash(w, r, basePath, "", "Autobrr integration is not configured.")
 		return
 	}
 
 	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
-	schema, err := client.SchemaForURL(entry.TrackerURL)
+
+	// Check if Autobrr already has an indexer at this URL. If so, link to it
+	// rather than creating a duplicate.
+	existing, err := client.IndexerByURL(entry.TrackerURL)
 	if err != nil {
-		flash(w, r, pathConfigTrackers, "", "Autobrr schema lookup failed: "+err.Error())
-		return
-	}
-	added, err := client.AddIndexer(*schema, entry.TrackerURL, entry.APIKey)
-	if err != nil {
-		flash(w, r, pathConfigTrackers, "", "Autobrr add failed: "+err.Error())
+		h.flashError(w, r, basePath, "AUTOBRR", "Autobrr indexer lookup failed", err)
 		return
 	}
 
-	cfg.Trackers[idx].AutobrrID = int(added.ID)
-	cfg.Trackers[idx].AutobrrIdentifier = added.Identifier
-	cfg.Trackers[idx].AutobrrEnabled = added.Enabled
+	var linked *autobrr.Indexer
+	var linkedSettings map[string]string
+	var action string
+	if existing != nil {
+		linked = existing
+		linkedSettings = h.autobrrSettingsForLinked(entry, *linked)
+		action = "linked to existing"
+	} else {
+		schema, err := client.SchemaForURL(entry.TrackerURL)
+		if err != nil {
+			h.flashError(w, r, basePath, "AUTOBRR", "Autobrr schema lookup failed", err)
+			return
+		}
+		settings := h.autobrrSettingsForNew(entry, *schema)
+		var added *autobrr.Indexer
+		if settings != nil {
+			added, err = client.AddIndexerWithSettings(*schema, entry.TrackerURL, settings)
+		} else {
+			added, err = client.AddIndexer(*schema, entry.TrackerURL, entry.APIKey)
+		}
+		if err != nil {
+			h.flashError(w, r, basePath, "AUTOBRR", "Autobrr add failed", err)
+			return
+		}
+		linked = added
+		linkedSettings = settings
+		if def := h.autobrrDefFor(entry, linked.Identifier); def != nil {
+			linkedSettings = autobrr.MergeSettings(*def, linkedSettings, autobrr.SettingsFromPairs(linked.Settings))
+		} else if linkedSettings == nil {
+			linkedSettings = autobrr.SettingsFromPairs(linked.Settings)
+		}
+		action = "added to"
+	}
+
+	autobrrCfg := cfg.Trackers[idx].EnsureAutobrr()
+	autobrrCfg.ID = int(linked.ID)
+	autobrrCfg.Identifier = linked.Identifier
+	autobrrCfg.Enabled = linked.Enabled
+	autobrrCfg.Settings = linkedSettings
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
-	h.log.Info("CONFIG", fmt.Sprintf("Added %q to Autobrr (id=%d)", entry.Name, added.ID))
-	flash(w, r, pathConfigTrackers, entry.Name+" added to Autobrr.", "")
+	h.log.Info("CONFIG", fmt.Sprintf("%s %q in Autobrr (id=%d)", action, entry.Name, linked.ID))
+	flash(w, r, basePath, entry.Name+" "+action+" Autobrr.", "")
 }
 
 // configTrackerAutobrrToggle flips Autobrr's enabled flag for this indexer
@@ -165,32 +199,33 @@ func (h *Handler) configTrackerAutobrrAdd(w http.ResponseWriter, r *http.Request
 func (h *Handler) configTrackerAutobrrToggle(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
+		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
+	basePath := trackerConfigPath(idx) + "/autobrr"
 	entry := cfg.Trackers[idx]
-	if entry.AutobrrID == 0 {
-		flash(w, r, pathConfigTrackers, "", entry.Name+" is not in Autobrr.")
+	if entry.AutobrrID() == 0 {
+		flash(w, r, basePath, "", entry.Name+" is not in Autobrr.")
 		return
 	}
 
 	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
-	if err := client.SetEnabled(int64(entry.AutobrrID), !entry.AutobrrEnabled); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Autobrr update failed: "+err.Error())
+	if err := client.SetEnabled(int64(entry.AutobrrID()), !entry.AutobrrEnabled()); err != nil {
+		h.flashError(w, r, basePath, "AUTOBRR", "Autobrr update failed", err)
 		return
 	}
 
-	cfg.Trackers[idx].AutobrrEnabled = !entry.AutobrrEnabled
+	cfg.Trackers[idx].EnsureAutobrr().Enabled = !entry.AutobrrEnabled()
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	status := "disabled"
-	if cfg.Trackers[idx].AutobrrEnabled {
+	if cfg.Trackers[idx].AutobrrEnabled() {
 		status = "enabled"
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("%s %s in Autobrr", entry.Name, status))
-	flash(w, r, pathConfigTrackers, entry.Name+" "+status+" in Autobrr.", "")
+	flash(w, r, basePath, entry.Name+" "+status+" in Autobrr.", "")
 }
 
 // configTrackerAutobrrRemove deletes the indexer in Autobrr and clears the
@@ -198,29 +233,31 @@ func (h *Handler) configTrackerAutobrrToggle(w http.ResponseWriter, r *http.Requ
 func (h *Handler) configTrackerAutobrrRemove(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
+		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
+	basePath := trackerConfigPath(idx) + "/autobrr"
 	entry := cfg.Trackers[idx]
-	if entry.AutobrrID == 0 {
-		flash(w, r, pathConfigTrackers, "", entry.Name+" is not in Autobrr.")
+	if entry.AutobrrID() == 0 {
+		flash(w, r, basePath, "", entry.Name+" is not in Autobrr.")
 		return
 	}
 	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
-	if err := client.DeleteIndexer(int64(entry.AutobrrID)); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Autobrr remove failed: "+err.Error())
+	if err := client.DeleteIndexer(int64(entry.AutobrrID())); err != nil {
+		h.flashError(w, r, basePath, "AUTOBRR", "Autobrr remove failed", err)
 		return
 	}
 
-	cfg.Trackers[idx].AutobrrID = 0
-	cfg.Trackers[idx].AutobrrIdentifier = ""
-	cfg.Trackers[idx].AutobrrEnabled = false
+	autobrrCfg := cfg.Trackers[idx].EnsureAutobrr()
+	autobrrCfg.ID = 0
+	autobrrCfg.Identifier = ""
+	autobrrCfg.Enabled = false
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Removed %q from Autobrr", entry.Name))
-	flash(w, r, pathConfigTrackers, entry.Name+" removed from Autobrr.", "")
+	flash(w, r, basePath, entry.Name+" removed from Autobrr.", "")
 }
 
 // ── import flow ────────────────────────────────────────────────────
@@ -236,20 +273,21 @@ type autobrrImportData struct {
 	Section      string
 }
 
-// autobrrImportRow is one importable indexer fetched from Autobrr that PTV
-// doesn't yet manage. Matched to a PTV-known tracker by URL.
+// autobrrImportRow is a managed PTV tracker that has a matching Autobrr
+// indexer (by URL) but is not yet linked (AutobrrID == 0).
 type autobrrImportRow struct {
-	AutobrrID  int
-	Name       string
-	Identifier string
-	BaseURL    string
-	Enabled    bool
-	SchemaName string // matching definition name from the PTV catalog
+	DefinitionName string // PTV tracker definition name — form submission key
+	TrackerName    string
+	TrackerURL     string
+	AutobrrID      int
+	Identifier     string
+	Enabled        bool
+	Settings       map[string]string
 }
 
-// importAutobrrPage lists Autobrr indexers that map to a tracker in PTV's
-// catalog but are not yet managed locally. Selecting them creates PTV
-// TrackerEntry rows with the AutobrrID already linked.
+// importAutobrrPage lists managed PTV trackers that have a matching Autobrr
+// indexer but are not yet linked. Selecting them populates the AutobrrID and
+// identifier on the existing tracker entry.
 func (h *Handler) importAutobrrPage(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	data := autobrrImportData{
@@ -257,30 +295,28 @@ func (h *Handler) importAutobrrPage(w http.ResponseWriter, r *http.Request) {
 		FlashError:   r.URL.Query().Get("err"),
 		FlashSuccess: r.URL.Query().Get("ok"),
 		ActiveTab:    "import",
-		Section:      "autobrr",
+		Section:      "integrations",
 	}
 	if !cfg.AutobrrEnabled || cfg.AutobrrURL == "" || cfg.AutobrrAPIKey == "" {
 		data.LoadError = "Autobrr integration is not configured."
-		h.render(w, "autobrr_import", data)
+		h.render(w, r, "autobrr_import", data)
 		return
 	}
 	rows, err := h.loadAutobrrImportable(&cfg)
 	if err != nil {
 		data.LoadError = err.Error()
-		h.render(w, "autobrr_import", data)
+		h.render(w, r, "autobrr_import", data)
 		return
 	}
 	data.OK = true
 	data.Importable = rows
-	h.render(w, "autobrr_import", data)
+	h.render(w, r, "autobrr_import", data)
 }
 
-// importAutobrrSubmit creates one PTV TrackerEntry per selected Autobrr
-// indexer. Same skip-on-conflict semantics as the Prowlarr import.
+// importAutobrrSubmit links each selected PTV tracker to its matching Autobrr
+// indexer by populating AutobrrID, AutobrrIdentifier, and AutobrrEnabled on
+// the existing tracker entry. No new PTV tracker entries are created.
 func (h *Handler) importAutobrrSubmit(w http.ResponseWriter, r *http.Request) {
-	if !h.defsReady(w, r, pathAutobrrImport) {
-		return
-	}
 	if err := r.ParseForm(); err != nil {
 		flash(w, r, pathAutobrrImport, "", "invalid form")
 		return
@@ -290,98 +326,126 @@ func (h *Handler) importAutobrrSubmit(w http.ResponseWriter, r *http.Request) {
 		flash(w, r, pathAutobrrImport, "", "Autobrr not enabled")
 		return
 	}
-	idStrs := r.Form["autobrr_id"]
-	if len(idStrs) == 0 {
+	defNames := r.Form["definition_name"]
+	if len(defNames) == 0 {
 		flash(w, r, pathAutobrrImport, "", "No trackers selected")
-		return
-	}
-
-	_, typeMap, err := h.catalogMaps()
-	if err != nil {
-		flash(w, r, pathAutobrrImport, "", "Catalog unavailable: "+err.Error())
 		return
 	}
 
 	rows, err := h.loadAutobrrImportable(&cfg)
 	if err != nil {
-		flash(w, r, pathAutobrrImport, "", "Autobrr fetch failed: "+err.Error())
+		h.flashError(w, r, pathAutobrrImport, "AUTOBRR", "Autobrr fetch failed", err)
 		return
 	}
-	byID := map[int]autobrrImportRow{}
+	byDef := make(map[string]autobrrImportRow, len(rows))
 	for _, row := range rows {
-		byID[row.AutobrrID] = row
+		byDef[strings.ToLower(row.DefinitionName)] = row
 	}
 
-	already := managedSet(cfg.Trackers)
-	var imported []string
-	for _, idStr := range idStrs {
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			continue
-		}
-		row, ok := byID[id]
+	var linked []string
+	for _, defName := range defNames {
+		row, ok := byDef[strings.ToLower(defName)]
 		if !ok {
 			continue
 		}
-		if already[strings.ToLower(row.SchemaName)] {
-			continue
+		for i, t := range cfg.Trackers {
+			if strings.ToLower(t.DefinitionName) != strings.ToLower(defName) {
+				continue
+			}
+			autobrrCfg := cfg.Trackers[i].EnsureAutobrr()
+			autobrrCfg.ID = row.AutobrrID
+			autobrrCfg.Identifier = row.Identifier
+			autobrrCfg.Enabled = row.Enabled
+			autobrrCfg.Settings = row.Settings
+			linked = append(linked, t.Name)
+			h.log.Info("CONFIG", fmt.Sprintf("Linked %q to Autobrr indexer id=%d", t.Name, row.AutobrrID))
+			break
 		}
-		entry := &config.TrackerEntry{
-			DefinitionName:    row.SchemaName,
-			TrackerType:       typeMap[strings.ToLower(row.SchemaName)],
-			Name:              row.Name,
-			TrackerURL:        row.BaseURL,
-			AutobrrID:         row.AutobrrID,
-			AutobrrIdentifier: row.Identifier,
-			AutobrrEnabled:    row.Enabled,
-		}
-		cfg.Trackers = append(cfg.Trackers, entry)
-		already[strings.ToLower(entry.DefinitionName)] = true
-		imported = append(imported, entry.Name)
-		h.log.Info("CONFIG", fmt.Sprintf("Imported %q from Autobrr", entry.Name))
-		h.discoverBrandingAsync(entry.DefinitionName, entry.TrackerURL)
 	}
-	if len(imported) == 0 {
-		flash(w, r, pathAutobrrImport, "", "Nothing imported.")
+	if len(linked) == 0 {
+		flash(w, r, pathAutobrrImport, "", "Nothing linked.")
 		return
 	}
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathAutobrrImport, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathAutobrrImport, "CONFIG", "Save failed", err)
 		return
 	}
-	flash(w, r, "/", fmt.Sprintf("Imported %d tracker(s) from Autobrr: %s.",
-		len(imported), strings.Join(imported, ", ")), "")
+	flash(w, r, "/", fmt.Sprintf("Linked %d tracker(s) to Autobrr: %s.",
+		len(linked), strings.Join(linked, ", ")), "")
 }
 
-// loadAutobrrImportable fetches Autobrr indexers, cross-references them
-// against the PTV catalog by URL, and filters out anything PTV already
-// manages.
+// loadAutobrrImportable finds managed PTV trackers that have no AutobrrID yet
+// but have a matching indexer in Autobrr (matched by normalized base URL).
 func (h *Handler) loadAutobrrImportable(cfg *config.Config) ([]autobrrImportRow, error) {
-	urlToName, _, err := h.catalogMaps()
-	if err != nil {
-		return nil, fmt.Errorf("catalog: %w", err)
-	}
 	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
-	configured, err := client.GetIndexers()
+	idxs, err := client.GetIndexers()
 	if err != nil {
 		return nil, fmt.Errorf("fetch Autobrr indexers: %w", err)
 	}
-	already := managedSet(cfg.Trackers)
+
+	byURL := make(map[string]autobrr.Indexer, len(idxs))
+	for _, idx := range idxs {
+		if idx.BaseURL != "" {
+			byURL[autobrr.NormalizeURL(idx.BaseURL)] = idx
+		}
+	}
 
 	var out []autobrrImportRow
-	for _, idx := range configured {
-		schemaName, inCatalog := urlToName[autobrr.NormalizeURL(idx.BaseURL)]
-		if idx.BaseURL == "" || !inCatalog || already[strings.ToLower(schemaName)] {
+	for _, t := range cfg.Trackers {
+		if t.AutobrrID() > 0 || t.TrackerURL == "" {
+			continue
+		}
+		idx, ok := byURL[autobrr.NormalizeURL(t.TrackerURL)]
+		if !ok {
 			continue
 		}
 		out = append(out, autobrrImportRow{
-			AutobrrID:  int(idx.ID),
-			Name:       idx.Name,
-			Identifier: idx.Identifier,
-			BaseURL:    idx.BaseURL,
-			Enabled:    idx.Enabled,
-			SchemaName: schemaName,
+			DefinitionName: t.DefinitionName,
+			TrackerName:    t.Name,
+			TrackerURL:     t.TrackerURL,
+			AutobrrID:      int(idx.ID),
+			Identifier:     idx.Identifier,
+			Enabled:        idx.Enabled,
+			Settings:       h.autobrrSettingsForLinked(t, idx),
 		})
 	}
 	return out, nil
+}
+
+func (h *Handler) autobrrSettingsForNew(t *config.TrackerEntry, schema autobrr.IndexerSchema) map[string]string {
+	def := h.autobrrDefFor(t, schema.Identifier)
+	if def == nil {
+		return nil
+	}
+	settings := autobrr.MergeSettings(*def, autobrr.SettingsFromPairs(schema.Settings), nil)
+	return autobrr.WithCoreCredentials(*def, settings, t.APIKey)
+}
+
+func (h *Handler) autobrrSettingsForLinked(t *config.TrackerEntry, idx autobrr.Indexer) map[string]string {
+	settings := autobrr.SettingsFromPairs(idx.Settings)
+	def := h.autobrrDefFor(t, idx.Identifier)
+	if def == nil {
+		return settings
+	}
+	return autobrr.MergeSettings(*def, settings, nil)
+}
+
+func (h *Handler) autobrrDefFor(t *config.TrackerEntry, identifier string) *autobrrdefs.Def {
+	if h.autobrrSyncer == nil {
+		return nil
+	}
+	if identifier != "" {
+		if def := h.autobrrSyncer.ByIdentifier(identifier); def != nil {
+			return def
+		}
+	}
+	if t.AutobrrIdentifier() != "" {
+		if def := h.autobrrSyncer.ByIdentifier(t.AutobrrIdentifier()); def != nil {
+			return def
+		}
+	}
+	if t.TrackerURL != "" {
+		return h.autobrrSyncer.ByURL(t.TrackerURL)
+	}
+	return nil
 }

@@ -24,15 +24,22 @@ import (
 // refreshResult is the data passed to the tracker_cards partial.
 type refreshResult struct {
 	Trackers []*trackerCardView
-	LastSync *time.Time
 }
 
 // refresh syncs every configured tracker. Trackers without credentials
 // are skipped (rather than errored) — they're presumably half-configured.
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
-	cfg := h.store.Get()
 	h.log.Info("SYSTEM", "Refresh-all triggered")
+	cfg := h.refreshAllEntries()
+	views := h.buildTrackerViews(cfg)
+	sortTrackerViews(views, r.URL.Query().Get("sort"))
+	h.renderPartial(w, "tracker_cards", refreshResult{
+		Trackers: views,
+	})
+}
 
+func (h *Handler) refreshAllEntries() config.Config {
+	cfg := h.store.Get()
 	changed := false
 	for i, entry := range cfg.Trackers {
 		if entry.APIKey == "" || entry.TrackerURL == "" {
@@ -42,19 +49,14 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		h.refreshOneEntry(&cfg, i)
 		changed = true
 	}
-
 	if changed {
 		// Persist even partial failures: SyncError + LastSync is what
-		// the UI uses to render the stale-mark and per-card error banner.
-		_ = h.store.Save(&cfg)
+		// the UI uses to render the per-card error banner.
+		if err := h.store.Save(&cfg); err != nil {
+			h.log.Err("TRACKER", "refresh save failed: "+err.Error())
+		}
 	}
-
-	views := h.buildTrackerViews(cfg)
-	sortTrackerViews(views, r.URL.Query().Get("sort"))
-	h.renderPartial(w, "tracker_cards", refreshResult{
-		Trackers: views,
-		LastSync: latestSync(cfg.Trackers),
-	})
+	return cfg
 }
 
 // refreshOne refreshes a single tracker by URL-path index and returns
@@ -71,7 +73,9 @@ func (h *Handler) refreshOne(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.refreshOneEntry(&cfg, idx)
-	_ = h.store.Save(&cfg)
+	if err := h.store.Save(&cfg); err != nil {
+		h.log.Err("TRACKER", "refresh save failed: "+err.Error())
+	}
 	views := h.buildTrackerViews(cfg)
 	h.renderPartial(w, "tracker_card", views[idx])
 }
@@ -91,6 +95,9 @@ func (h *Handler) refreshOneEntry(cfg *config.Config, i int) {
 	}
 
 	tt := resolveTrackerType(entry.TrackerType)
+	if tt == nil {
+		return // unsupported tracker type — skip silently
+	}
 	stats, err := tt.FetchStats(entry.TrackerURL, entry.APIKey, h.log)
 
 	now := time.Now()
@@ -111,16 +118,11 @@ func (h *Handler) refreshOneEntry(cfg *config.Config, i int) {
 	}
 }
 
-// resolveTrackerType looks up a registered TrackerType by ID.
-// Falls back to "unit3d" to handle entries created before TrackerType
-// was introduced.
+// resolveTrackerType returns the registered TrackerType for typeID, or nil
+// if the ID is empty or unknown. A nil result means "unsupported" — the
+// caller skips that tracker rather than guessing a type.
 func resolveTrackerType(typeID string) trackertype.Type {
-	if typeID != "" {
-		if tt := trackertype.Lookup(typeID); tt != nil {
-			return tt
-		}
-	}
-	return trackertype.Lookup("unit3d")
+	return trackertype.Lookup(typeID)
 }
 
 // latestSync returns the most recent LastSync across all trackers, or nil

@@ -62,20 +62,11 @@ type configTrackersData struct {
 	Section         string // for the shared config_nav partial
 }
 
-type configProwlarrData struct {
-	Config       config.Config
-	FlashError   string
-	FlashSuccess string
-	ActiveTab    string // "settings" | "import" | "sync"
-	Section      string
-}
-
 // Redirect paths used by the flash() helper. Centralized so callers
 // don't sprinkle string literals.
 const (
 	pathConfig         = "/config"
-	pathConfigTrackers = "/config/trackers"
-	pathConfigProwlarr = "/config/prowlarr"
+	pathConfigTrackers = "/trackers/add"
 )
 
 // ── /config landing ────────────────────────────────────────────────────────
@@ -96,7 +87,7 @@ func (h *Handler) configLanding(w http.ResponseWriter, r *http.Request) {
 		FlashSuccess:    r.URL.Query().Get("ok"),
 	}
 	data.DefsState, data.DefsMsg = h.syncer.Status()
-	h.render(w, "config_landing", data)
+	h.render(w, r, "config_landing", data)
 }
 
 // ── /config/trackers ──────────────────────────────────────────────────────────
@@ -125,7 +116,7 @@ func (h *Handler) configTrackersPage(w http.ResponseWriter, r *http.Request) {
 	allDefs := h.catalogIfReady(data.DefsState, &data.LoadError)
 	data.Rows = buildConfigRows(cfg.Trackers, allDefs)
 
-	h.render(w, "config_trackers", data)
+	h.render(w, r, "config_trackers", data)
 }
 
 // catalogIfReady returns the parsed catalog if the syncer has it, or
@@ -190,98 +181,6 @@ func buildConfigRows(trackers []*config.TrackerEntry, allDefs []defs.TrackerDef)
 	return append(configured, available...)
 }
 
-// ── /config/prowlarr (settings tab) ───────────────────────────────────────────────────
-
-// configProwlarrPage renders the Prowlarr connection settings. If the
-// URL field is empty, we pre-fill a sensible Docker-network default —
-// most users have prowlarr on the same docker-compose stack.
-func (h *Handler) configProwlarrPage(w http.ResponseWriter, r *http.Request) {
-	cfg := h.store.Get()
-	if cfg.ProwlarrURL == "" {
-		cfg.ProwlarrURL = "http://prowlarr:9696"
-	}
-	h.render(w, "config_prowlarr", configProwlarrData{
-		Config:       cfg,
-		FlashError:   r.URL.Query().Get("err"),
-		FlashSuccess: r.URL.Query().Get("ok"),
-		ActiveTab:    "settings",
-		Section:      "prowlarr",
-	})
-}
-
-// configProwlarrPost saves Prowlarr URL + API key. We Ping() the
-// instance before persisting so the user gets immediate feedback on
-// bad credentials, rather than discovering the failure on the next
-// import attempt.
-//
-// Empty API key in the form means "keep existing" — lets the user save
-// just a URL change without retyping the key (which the form never
-// echoes back, by design).
-func (h *Handler) configProwlarrPost(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "invalid form")
-		return
-	}
-	prowlarrURL := strings.TrimSpace(r.FormValue("url"))
-	apiKey := strings.TrimSpace(r.FormValue("api_key"))
-	if prowlarrURL == "" {
-		flash(w, r, pathConfigProwlarr, "", "URL is required.")
-		return
-	}
-
-	cfg := h.store.Get()
-	if apiKey == "" {
-		if cfg.ProwlarrAPIKey == "" {
-			flash(w, r, pathConfigProwlarr, "", "API key is required.")
-			return
-		}
-		apiKey = cfg.ProwlarrAPIKey
-	}
-
-	h.log.Info("CONFIG", "Saving Prowlarr settings — testing connection")
-	client := prowlarr.New(prowlarrURL, apiKey, h.log)
-	if err := client.Ping(); err != nil {
-		h.log.Err("CONFIG", "Prowlarr ping failed: "+err.Error())
-		flash(w, r, pathConfigProwlarr, "", "Cannot reach Prowlarr: "+err.Error())
-		return
-	}
-
-	cfg.ProwlarrURL = prowlarrURL
-	cfg.ProwlarrAPIKey = apiKey
-	cfg.ProwlarrEnabled = true
-	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
-		return
-	}
-	h.log.Info("CONFIG", "Prowlarr settings saved")
-	flash(w, r, pathConfigProwlarr, "Prowlarr settings saved.", "")
-}
-
-// configProwlarrEnable / configProwlarrDisable flip the boolean without
-// touching credentials. Disabling preserves URL+key so re-enabling
-// doesn't require retyping.
-func (h *Handler) configProwlarrEnable(w http.ResponseWriter, r *http.Request) {
-	cfg := h.store.Get()
-	cfg.ProwlarrEnabled = true
-	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
-		return
-	}
-	h.log.Info("CONFIG", "Prowlarr integration enabled")
-	flash(w, r, pathConfigProwlarr, "Prowlarr integration enabled.", "")
-}
-
-func (h *Handler) configProwlarrDisable(w http.ResponseWriter, r *http.Request) {
-	cfg := h.store.Get()
-	cfg.ProwlarrEnabled = false
-	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
-		return
-	}
-	h.log.Info("CONFIG", "Prowlarr integration disabled (credentials preserved)")
-	flash(w, r, pathConfigProwlarr, "Prowlarr integration disabled.", "")
-}
-
 // ── add from catalog ──────────────────────────────────────────────────────────
 
 // configAdd is the "add a new tracker from the YAML catalog" path.
@@ -344,7 +243,7 @@ func (h *Handler) configAdd(w http.ResponseWriter, r *http.Request) {
 
 	cfg.Trackers = append(cfg.Trackers, entry)
 	if err := h.store.Save(&cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, pathConfigTrackers, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Added %q from catalog (override=%v, validated=%v)",
@@ -372,25 +271,24 @@ func (h *Handler) trackerIndex(r *http.Request) (int, *config.Config, bool) {
 }
 
 // configTrackerUpdate accepts URL and API-key edits. Either field may
-// be blank to mean "keep existing". Validation rules match configAdd
-// (validate by default, FORCE SAVE skips validation but clears the
-// stats so the UI reflects "stats unknown until re-validated").
+// be blank to mean "keep existing". Always validates; if validation fails,
+// renders the config page with error and "Save Anyway" option.
 func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
+		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		flash(w, r, pathConfigTrackers, "", "invalid form")
+		flash(w, r, trackerConfigPath(idx), "", "invalid form")
 		return
 	}
-	override := r.FormValue("override") == "true"
+
+	forceSave := r.FormValue("force_save") == "true"
 	newURL := strings.TrimSpace(r.FormValue("url"))
 	newKey := strings.TrimSpace(r.FormValue("api_key"))
 
-	// "Keep existing on blank" — applied after trim so accidental
-	// whitespace doesn't wipe a configured value.
+	// "Keep existing on blank" — applied after trim
 	effURL := cfg.Trackers[idx].TrackerURL
 	effKey := cfg.Trackers[idx].APIKey
 	if newURL != "" {
@@ -401,13 +299,13 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	name := cfg.Trackers[idx].Name
 
-	if !override {
+	// Always validate unless force saving
+	if !forceSave {
 		stats, vErr := h.validateTracker(cfg.Trackers[idx].TrackerType, effURL, effKey)
 		if vErr != nil {
 			h.log.Err("CONFIG", fmt.Sprintf("Validation failed for %q: %s", name, vErr.Error()))
-			flash(w, r, pathConfigTrackers, "", fmt.Sprintf(
-				"%s validation failed: %s — use FORCE SAVE to save without validation, or fix credentials and retry.",
-				name, vErr.Error()))
+			// Render the config page with validation error, preserving user input
+			h.renderTrackerConfigWithError(w, r, idx, cfg, newURL, newKey, vErr.Error())
 			return
 		}
 		now := time.Now()
@@ -415,7 +313,7 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 		cfg.Trackers[idx].LastSync = &now
 		cfg.Trackers[idx].SyncError = ""
 	} else {
-		// FORCE SAVE: clear stats — we can't claim they're current.
+		// Save anyway: clear stats since we're not validating
 		cfg.Trackers[idx].UserStats = nil
 		cfg.Trackers[idx].LastSync = nil
 		cfg.Trackers[idx].SyncError = ""
@@ -425,117 +323,12 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 	cfg.Trackers[idx].APIKey = effKey
 
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Save failed", err)
 		return
 	}
-	h.log.Info("CONFIG", fmt.Sprintf("Updated tracker %q credentials (override=%v)", name, override))
+	h.log.Info("CONFIG", fmt.Sprintf("Updated tracker %q credentials (forceSave=%v)", name, forceSave))
 	h.discoverBrandingAsync(cfg.Trackers[idx].DefinitionName, cfg.Trackers[idx].TrackerURL)
-	flash(w, r, pathConfigTrackers, name+" updated.", "")
-}
-
-// configTrackerProwlarrAdd creates a new indexer in Prowlarr from the
-// tracker's stored credentials. The Prowlarr ID Prowlarr returns is
-// then persisted so subsequent toggle/remove operations can target it.
-func (h *Handler) configTrackerProwlarrAdd(w http.ResponseWriter, r *http.Request) {
-	idx, cfg, ok := h.trackerIndex(r)
-	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
-		return
-	}
-	entry := cfg.Trackers[idx]
-	if entry.TrackerURL == "" || entry.APIKey == "" {
-		flash(w, r, pathConfigTrackers, "", entry.Name+": set URL and API key first.")
-		return
-	}
-
-	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-	schema, err := client.SchemaByName(entry.DefinitionName)
-	if err != nil {
-		flash(w, r, pathConfigTrackers, "", "Schema not found in Prowlarr: "+err.Error())
-		return
-	}
-	added, err := client.AddIndexer(*schema, entry.TrackerURL, entry.APIKey)
-	if err != nil {
-		flash(w, r, pathConfigTrackers, "", "Prowlarr add failed: "+err.Error())
-		return
-	}
-
-	cfg.Trackers[idx].ProwlarrID = added.ID
-	cfg.Trackers[idx].Enabled = added.Enable
-	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
-		return
-	}
-	h.log.Info("CONFIG", fmt.Sprintf("Added %q to Prowlarr (id=%d)", entry.Name, added.ID))
-	flash(w, r, pathConfigTrackers, entry.Name+" added to Prowlarr.", "")
-}
-
-// configTrackerProwlarrToggle flips Prowlarr's enable flag for this
-// indexer. The dashboard mirrors the resulting state.
-func (h *Handler) configTrackerProwlarrToggle(w http.ResponseWriter, r *http.Request) {
-	idx, cfg, ok := h.trackerIndex(r)
-	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
-		return
-	}
-	entry := cfg.Trackers[idx]
-	if entry.ProwlarrID == 0 {
-		flash(w, r, pathConfigTrackers, "", entry.Name+" is not in Prowlarr.")
-		return
-	}
-
-	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-	indexer, err := client.GetIndexer(entry.ProwlarrID)
-	if err != nil {
-		flash(w, r, pathConfigTrackers, "", "Prowlarr fetch failed: "+err.Error())
-		return
-	}
-	if err := client.SetEnabled(*indexer, !entry.Enabled); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Prowlarr update failed: "+err.Error())
-		return
-	}
-
-	cfg.Trackers[idx].Enabled = !entry.Enabled
-	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
-		return
-	}
-	status := "disabled"
-	if cfg.Trackers[idx].Enabled {
-		status = "enabled"
-	}
-	h.log.Info("CONFIG", fmt.Sprintf("%s %s in Prowlarr", entry.Name, status))
-	flash(w, r, pathConfigTrackers, entry.Name+" "+status+" in Prowlarr.", "")
-}
-
-// configTrackerProwlarrRemove deletes the indexer in Prowlarr and
-// clears the local ProwlarrID. We do NOT delete the tracker from the
-// dashboard — only the Prowlarr linkage is broken.
-func (h *Handler) configTrackerProwlarrRemove(w http.ResponseWriter, r *http.Request) {
-	idx, cfg, ok := h.trackerIndex(r)
-	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
-		return
-	}
-	entry := cfg.Trackers[idx]
-	if entry.ProwlarrID == 0 {
-		flash(w, r, pathConfigTrackers, "", entry.Name+" is not in Prowlarr.")
-		return
-	}
-	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-	if err := client.DeleteIndexer(entry.ProwlarrID); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Prowlarr remove failed: "+err.Error())
-		return
-	}
-
-	cfg.Trackers[idx].ProwlarrID = 0
-	cfg.Trackers[idx].Enabled = false
-	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
-		return
-	}
-	h.log.Info("CONFIG", fmt.Sprintf("Removed %q from Prowlarr", entry.Name))
-	flash(w, r, pathConfigTrackers, entry.Name+" removed from Prowlarr.", "")
+	flash(w, r, trackerConfigPath(idx), name+" updated.", "")
 }
 
 // configTrackerDelete removes a tracker from the dashboard. Prowlarr
@@ -544,17 +337,18 @@ func (h *Handler) configTrackerProwlarrRemove(w http.ResponseWriter, r *http.Req
 func (h *Handler) configTrackerDelete(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
-		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
+		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
+	basePath := trackerConfigPath(idx)
 	name := cfg.Trackers[idx].Name
 	cfg.Trackers = append(cfg.Trackers[:idx], cfg.Trackers[idx+1:]...)
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
+		h.flashError(w, r, basePath, "CONFIG", "Save failed", err)
 		return
 	}
 	h.log.Info("CONFIG", fmt.Sprintf("Deleted %q from dashboard", name))
-	flash(w, r, pathConfigTrackers, name+" removed from dashboard.", "")
+	flash(w, r, "/", name+" removed from dashboard.", "")
 }
 
 // ── shared helpers (used by sibling files too) ───────────────────────────────────────────────
@@ -634,8 +428,11 @@ func (h *Handler) loadImportable(client *prowlarr.Client, cfg *config.Config) ([
 	var out []configuredImport
 	for _, idx := range configured {
 		idxURL, key := prowlarr.ExtractCreds(idx.Fields)
+		if idxURL == "" && len(idx.IndexerUrls) > 0 {
+			idxURL = idx.IndexerUrls[0]
+		}
 		schemaName, inCatalog := urlToName[prowlarr.NormalizeURL(idxURL)]
-		if idxURL == "" || !inCatalog || already[strings.ToLower(schemaName)] {
+		if !inCatalog || already[strings.ToLower(schemaName)] {
 			continue
 		}
 		out = append(out, configuredImport{

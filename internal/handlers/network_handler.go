@@ -29,9 +29,9 @@ type networkPageData struct {
 // can copy their current address rather than try to remember it.
 func (h *Handler) networkPage(w http.ResponseWriter, r *http.Request) {
 	n := h.store.GetNetACL()
-	h.render(w, "config_network", networkPageData{
+	h.render(w, r, "config_network", networkPageData{
 		NetACL:       n,
-		Section:      "network",
+		Section:      "app",
 		ClientIP:     clientIP(r),
 		FlashError:   r.URL.Query().Get("err"),
 		FlashSuccess: r.URL.Query().Get("ok"),
@@ -49,7 +49,7 @@ func (h *Handler) networkPage(w http.ResponseWriter, r *http.Request) {
 // is also what releases the user from the network-confirmation gate.
 func (h *Handler) networkSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		flash(w, r, "/config/network", "", "invalid form")
+		flash(w, r, "/config/app/network", "", "invalid form")
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *Handler) networkSubmit(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.acl.Reload(cidrs, proxyHost)
 	if err != nil {
-		flash(w, r, "/config/network", "", "Invalid network config: "+err.Error())
+		h.flashError(w, r, "/config/app/network", "CONFIG", "Invalid network config", err)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *Handler) networkSubmit(w http.ResponseWriter, r *http.Request) {
 		ProxyHost:    proxyHost,
 	}
 	if err := h.store.SaveNetACL(saved); err != nil {
-		flash(w, r, "/config/network", "", "Save failed: "+err.Error())
+		h.flashError(w, r, "/config/app/network", "CONFIG", "Save failed", err)
 		return
 	}
 
@@ -81,7 +81,7 @@ func (h *Handler) networkSubmit(w http.ResponseWriter, r *http.Request) {
 	// First-run save: send to the config landing so the user can keep
 	// configuring. Subsequent saves loop back to the network page so
 	// the user can keep editing the allowlist.
-	target := "/config/network"
+	target := "/config/app/network"
 	if firstRun {
 		target = "/config"
 	}

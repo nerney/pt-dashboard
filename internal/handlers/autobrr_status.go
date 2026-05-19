@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/nerney/ptv/internal/autobrr"
 	"github.com/nerney/ptv/internal/config"
 )
@@ -23,7 +25,10 @@ const (
 // unchanged.
 type trackerCardView struct {
 	*config.TrackerEntry
-	AutobrrIRCStatus string
+	AutobrrIRCStatus  string
+	TrackerConfigURL  string
+	ProwlarrConfigURL string
+	AutobrrConfigURL  string
 }
 
 // buildTrackerViews wraps every configured tracker in a render view and,
@@ -33,7 +38,16 @@ type trackerCardView struct {
 func (h *Handler) buildTrackerViews(cfg config.Config) []*trackerCardView {
 	views := make([]*trackerCardView, len(cfg.Trackers))
 	for i, t := range cfg.Trackers {
-		views[i] = &trackerCardView{TrackerEntry: t}
+		views[i] = &trackerCardView{
+			TrackerEntry:     t,
+			TrackerConfigURL: "/tracker/" + strconv.Itoa(i) + "/config",
+		}
+		if cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != "" && t.DefinitionName != "" {
+			views[i].ProwlarrConfigURL = "/tracker/" + strconv.Itoa(i) + "/config/prowlarr"
+		}
+		if cfg.AutobrrEnabled && cfg.AutobrrURL != "" && cfg.AutobrrAPIKey != "" && t.DefinitionName != "" {
+			views[i].AutobrrConfigURL = "/tracker/" + strconv.Itoa(i) + "/config/autobrr"
+		}
 	}
 	h.fillAutobrrIRCStatus(cfg, views)
 	return views
@@ -50,7 +64,7 @@ func (h *Handler) fillAutobrrIRCStatus(cfg config.Config, views []*trackerCardVi
 	// Skip the API call entirely if no tracker is linked to Autobrr.
 	anyLinked := false
 	for _, v := range views {
-		if v.AutobrrID > 0 {
+		if v.AutobrrID() > 0 {
 			anyLinked = true
 			break
 		}
@@ -66,10 +80,10 @@ func (h *Handler) fillAutobrrIRCStatus(cfg config.Config, views []*trackerCardVi
 		return
 	}
 	for _, v := range views {
-		if v.AutobrrID == 0 {
+		if v.AutobrrID() == 0 {
 			continue
 		}
-		network := autobrr.MatchNetwork(networks, v.AutobrrIdentifier, v.Name)
+		network := autobrr.MatchNetwork(networks, v.AutobrrIdentifier(), v.Name)
 		if network == nil {
 			v.AutobrrIRCStatus = ircStatusUnknown
 			continue

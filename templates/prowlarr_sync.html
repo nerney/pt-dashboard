@@ -2,6 +2,7 @@
 <header class="site-header">
   <div class="header-brand">
     <a href="/" class="brand-link">
+      <img src="/static/icon.png" alt="" class="brand-icon">
       <span class="brand-mark">PTV</span>
       <span class="brand-sep">—</span>
       <span class="brand-sub">PROWLARR / SYNC</span>
@@ -37,13 +38,14 @@
     <h2 class="config-section-title">PROWLARR REQUIRED</h2>
     <div class="section-rule"></div>
     <p class="config-hint">Prowlarr is not enabled.</p>
-    <p class="config-hint"><a href="/config/prowlarr" class="link-action">→ CONFIGURE PROWLARR</a></p>
+    <p class="config-hint"><a href="/config/integrations/prowlarr" class="link-action">→ CONFIGURE PROWLARR</a></p>
   </section>
   {{ else }}
 
   <p class="config-hint">Push your tracker configuration into Prowlarr. Synced rows match Prowlarr's current state. New rows aren't in Prowlarr yet. Drift rows exist in both but differ — pushing overrides Prowlarr with this dashboard's values (uses <code>forceSave</code>).</p>
 
-  <form method="POST" action="/config/prowlarr/sync" class="sync-form">
+  <form method="POST" action="/sync/prowlarr" class="sync-form">
+    {{ $.CSRFField }}
 
     {{ if .New }}
     <section class="config-section">
@@ -89,6 +91,11 @@
               <span class="cmp-val">{{ .ProwlarrURL }}</span>
             </div>
           </div>
+          {{ if .SchemaError }}
+          <span class="muted">schema unavailable: {{ .SchemaError }}</span>
+          {{ else if .DiffFields }}
+          <span class="muted">fields: {{ range $i, $f := .DiffFields }}{{ if $i }}, {{ end }}{{ $f }}{{ end }}</span>
+          {{ end }}
         </label>
         {{ end }}
       </div>
@@ -126,7 +133,7 @@
   <section class="config-section">
     <h2 class="config-section-title">NOTHING TO SYNC</h2>
     <div class="section-rule"></div>
-    <p class="config-empty">No managed trackers yet. <a href="/config/trackers">Configure trackers</a> first.</p>
+    <p class="config-empty">No managed trackers yet. <a href="/trackers/add">Configure trackers</a> first.</p>
   </section>
   {{ end }}
 

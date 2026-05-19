@@ -2,6 +2,7 @@
 <header class="site-header">
   <div class="header-brand">
     <a href="/" class="brand-link">
+      <img src="/static/icon.png" alt="" class="brand-icon">
       <span class="brand-mark">PTV</span>
       <span class="brand-sep">—</span>
       <span class="brand-sub">AUTOBRR</span>
@@ -43,7 +44,8 @@
         </summary>
         <template>
         <div class="prowlarr-pill-body">
-          <form method="POST" action="/config/autobrr" class="config-form">
+          <form method="POST" action="/config/integrations/autobrr" class="config-form">
+    {{ $.CSRFField }}
             <div class="config-row">
               <div class="field">
                 <label class="field-label">URL</label>
@@ -61,7 +63,8 @@
               </div>
             </div>
           </form>
-          <form method="POST" action="/config/autobrr/disable" class="inline-form prowlarr-disable">
+          <form method="POST" action="/config/integrations/autobrr/disable" class="inline-form prowlarr-disable">
+    {{ $.CSRFField }}
             <button type="submit" class="btn-sm btn-ghost">DISABLE INTEGRATION</button>
           </form>
         </div>
@@ -69,7 +72,7 @@
       </details>
 
       <div class="prowlarr-quick-links">
-        <a href="/config/autobrr/import" class="link-action">→ IMPORT INDEXERS</a>
+        <a href="/config/integrations/autobrr/import" class="link-action">→ IMPORT INDEXERS</a>
       </div>
 
     {{ else if and .Config.AutobrrEnabled (not .Config.AutobrrAPIKey) }}
@@ -77,7 +80,8 @@
       <h2 class="config-section-title">SETTINGS</h2>
       <div class="section-rule"></div>
       <p class="config-hint">Connect to your Autobrr instance.</p>
-      <form method="POST" action="/config/autobrr" class="config-form">
+      <form method="POST" action="/config/integrations/autobrr" class="config-form">
+    {{ $.CSRFField }}
         <div class="config-row">
           <div class="field">
             <label class="field-label">URL</label>
@@ -95,7 +99,8 @@
           </div>
         </div>
       </form>
-      <form method="POST" action="/config/autobrr/disable" class="inline-form prowlarr-disable">
+      <form method="POST" action="/config/integrations/autobrr/disable" class="inline-form prowlarr-disable">
+    {{ $.CSRFField }}
         <button type="submit" class="btn-sm btn-ghost">CANCEL</button>
       </form>
 
@@ -105,7 +110,8 @@
         <span class="pill-mute">○</span>
         <span class="pill-text muted">AUTOBRR DISABLED</span>
         <span class="pill-sub muted">credentials preserved</span>
-        <form method="POST" action="/config/autobrr/enable" class="inline-form">
+        <form method="POST" action="/config/integrations/autobrr/enable" class="inline-form">
+    {{ $.CSRFField }}
           <button type="submit" class="btn-sm btn-ghost">RE-ENABLE</button>
         </form>
       </div>
@@ -115,7 +121,8 @@
       <h2 class="config-section-title">AUTOBRR INTEGRATION</h2>
       <div class="section-rule"></div>
       <p class="config-hint">Autobrr is optional. It lets you import already-configured indexers and push your tracker config out to Autobrr. Per-tracker IRC connection status is also surfaced on the dashboard cards.</p>
-      <form method="POST" action="/config/autobrr/enable" class="inline-form">
+      <form method="POST" action="/config/integrations/autobrr/enable" class="inline-form">
+    {{ $.CSRFField }}
         <button type="submit" class="btn-primary">ENABLE AUTOBRR INTEGRATION →</button>
       </form>
     {{ end }}

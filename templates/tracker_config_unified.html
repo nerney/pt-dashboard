@@ -1,0 +1,210 @@
+{{ define "content" }}
+<header class="site-header">
+  <div class="header-brand">
+    <a href="/" class="brand-link">
+      <span class="brand-back">←</span>
+      <img src="/static/icon.png" alt="" class="brand-icon">
+      <span class="brand-mark">PTV</span>
+      <span class="brand-sep">—</span>
+      <span class="brand-sub">{{ .Tracker.Name }}</span>
+    </a>
+  </div>
+</header>
+<div class="page-rule"></div>
+<main class="config-main">
+  {{ if .FlashError }}<div class="alert alert-error"><span class="alert-dot">●</span>{{ .FlashError }}</div>{{ end }}
+  {{ if .FlashSuccess }}<div class="alert alert-ok"><span class="alert-dot">●</span>{{ .FlashSuccess }}</div>{{ end }}
+  {{ if .ValidationError }}
+  <div class="alert alert-error">
+    <span class="alert-dot">●</span>
+    <strong>{{ .ValidationTrackerName }} validation failed:</strong> {{ .ValidationError }}
+  </div>
+  {{ end }}
+
+  <!-- PTV Config Section -->
+  <details class="config-section" open>
+    <summary class="config-section-title">PTV Configuration</summary>
+    <div class="section-rule"></div>
+    <form method="POST" action="/tracker/{{ .TrackerIdx }}/config" class="config-form">
+    {{ $.CSRFField }}
+      <div class="config-row">
+        <div class="field">
+          <label class="field-label">URL</label>
+          {{ $current := .Tracker.TrackerURL }}
+          {{ if .SubmittedURL }}{{ $current = .SubmittedURL }}{{ end }}
+          {{ if gt (len .URLs) 1 }}
+          <select class="field-input field-select" name="url">
+            {{ range .URLs }}<option value="{{ . }}" {{ if eq . $current }}selected{{ end }}>{{ . }}</option>{{ end }}
+          </select>
+          {{ else if eq (len .URLs) 1 }}
+          <input type="hidden" name="url" value="{{ index .URLs 0 }}">
+          <div class="field-authoritative">{{ index .URLs 0 }}</div>
+          {{ else }}
+          <input class="field-input" type="url" name="url" value="{{ $current }}" autocomplete="off">
+          {{ end }}
+        </div>
+        <div class="field">
+          <label class="field-label">API KEY</label>
+          <input class="field-input field-token" type="text" name="api_key" value="{{ .SubmittedAPIKey }}" placeholder="set — enter new key to replace" autocomplete="off">
+        </div>
+      </div>
+      <div class="import-submit-row">
+        <a href="/" class="btn-sm btn-ghost">CANCEL</a>
+        {{ if .ValidationError }}
+        <input type="hidden" name="force_save" value="true">
+        <button type="submit" class="btn-primary">SAVE ANYWAY →</button>
+        {{ else }}
+        <button type="submit" class="btn-primary">VALIDATE &amp; SAVE →</button>
+        {{ end }}
+      </div>
+    </form>
+    <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/delete" class="inline-form">
+    {{ $.CSRFField }}
+      <button type="submit" class="btn-sm btn-danger" onclick="return confirm('Remove {{ .Tracker.Name }} from dashboard?')">DELETE TRACKER</button>
+    </form>
+  </details>
+
+  <!-- Prowlarr Config Section -->
+  {{ if .ProwlarrEnabled }}
+  <details class="config-section">
+    <summary class="config-section-title">Prowlarr Configuration</summary>
+    <div class="section-rule"></div>
+    {{ if .ProwlarrError }}
+    <div class="alert alert-warn">
+      <span class="alert-dot">⚠</span>{{ .ProwlarrError }}
+    </div>
+    {{ else if .ProwlarrSchema }}
+    {{ $selectedProfile := .Tracker.ProwlarrAppProfileID }}
+    {{ $selectedTags := .Tracker.ProwlarrTags }}
+    <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/prowlarr" class="config-form">
+    {{ $.CSRFField }}
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Name</label>
+          <input class="field-input" type="text" name="prowlarr_name" value="{{ .ProwlarrBaseName }}" autocomplete="off">
+          <p class="config-hint">PTV appends [ptv] when syncing this indexer.</p>
+        </div>
+      </div>
+
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Enable</label>
+          <input type="hidden" name="enabled" value="false">
+          <label class="checkline">
+            <input type="checkbox" name="enabled" value="true" {{ if .Tracker.Enabled }}checked{{ end }}>
+            <span>enabled in Prowlarr</span>
+          </label>
+        </div>
+      </div>
+
+      {{ if .ProwlarrAppProfiles }}
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Sync Profile</label>
+          <select class="field-input field-select" name="app_profile_id">
+            {{ range .ProwlarrAppProfiles }}
+            <option value="{{ .ID }}" {{ if eq .ID $selectedProfile }}selected{{ end }}>{{ .Name }}</option>
+            {{ end }}
+          </select>
+        </div>
+      </div>
+      {{ end }}
+
+      {{ if .ProwlarrTags }}
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Tags</label>
+          {{ range .ProwlarrTags }}
+          <label class="checkline">
+            <input type="checkbox" name="tag" value="{{ .ID }}" {{ if hasInt $selectedTags .ID }}checked{{ end }}>
+            <span>{{ .Label }}</span>
+          </label>
+          {{ end }}
+        </div>
+      </div>
+      {{ end }}
+
+      {{ range .ProwlarrSettingRows }}
+      {{ template "setting_field" . }}
+      {{ end }}
+
+      <div class="import-submit-row">
+        <a href="/tracker/{{ .TrackerIdx }}/config" class="btn-sm btn-ghost">CANCEL</a>
+        <button type="submit" name="action" value="save" class="btn-sm btn-primary">SAVE</button>
+        <button type="submit" name="action" value="save_push" class="btn-primary">SAVE + REVIEW DIFF →</button>
+      </div>
+    </form>
+    {{ if gt .Tracker.ProwlarrID 0 }}
+    <div class="import-submit-row">
+      <a href="/tracker/{{ .TrackerIdx }}/config/prowlarr/diff" class="btn-sm btn-ghost">VIEW DRIFT</a>
+    </div>
+    {{ end }}
+    {{ end }}
+  </details>
+  {{ end }}
+
+  <!-- Autobrr Config Section -->
+  {{ if .AutobrrEnabled }}
+  <details class="config-section">
+    <summary class="config-section-title">Autobrr Configuration</summary>
+    <div class="section-rule"></div>
+    {{ if .AutobrrError }}
+    <div class="alert alert-warn">
+      <span class="alert-dot">⚠</span>{{ .AutobrrError }}
+    </div>
+    {{ else if .AutobrrDefinition }}
+    <form method="POST" action="/tracker/{{ .TrackerIdx }}/config/autobrr" class="config-form">
+    {{ $.CSRFField }}
+      {{ range .AutobrrSettingRows }}
+      {{ template "setting_field" . }}
+      {{ end }}
+
+      <div class="import-submit-row">
+        <a href="/tracker/{{ .TrackerIdx }}/config" class="btn-sm btn-ghost">CANCEL</a>
+        <button type="submit" name="action" value="save" class="btn-sm btn-primary">SAVE</button>
+        <button type="submit" name="action" value="save_push" class="btn-primary">SAVE + PUSH →</button>
+      </div>
+    </form>
+    {{ if gt .Tracker.AutobrrID 0 }}
+    <div class="import-submit-row">
+      <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/autobrr/toggle" class="inline-form">
+    {{ $.CSRFField }}
+        <button type="submit" class="btn-sm btn-ghost">{{ if .Tracker.AutobrrEnabled }}DISABLE IN AUTOBRR{{ else }}ENABLE IN AUTOBRR{{ end }}</button>
+      </form>
+      <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/autobrr/remove" class="inline-form">
+    {{ $.CSRFField }}
+        <button type="submit" class="btn-sm btn-danger">REMOVE FROM AUTOBRR</button>
+      </form>
+    </div>
+    {{ else }}
+    <div class="import-submit-row">
+      <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/autobrr/add" class="inline-form">
+    {{ $.CSRFField }}
+        <button type="submit" class="btn-primary">ADD TO AUTOBRR →</button>
+      </form>
+    </div>
+    {{ end }}
+    {{ end }}
+  </details>
+  {{ end }}
+</main>
+
+<style>
+.config-section summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.config-section summary::-webkit-details-marker { display: none; }
+.config-section summary::before {
+  content: "▶ ";
+  display: inline-block;
+  transition: transform 0.15s;
+  font-size: 0.7em;
+  margin-right: 0.4em;
+}
+.config-section[open] summary::before {
+  transform: rotate(90deg);
+}
+</style>
+{{ end }}
