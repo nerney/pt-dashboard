@@ -195,10 +195,17 @@ func (h *Handler) ensureProwlarrEnabled(client *prowlarr.Client, idx *prowlarr.I
 	if idx == nil {
 		return nil, fmt.Errorf("missing prowlarr indexer")
 	}
-	if idx.Enable == want {
-		return idx, nil
+
+	// Prowlarr update responses can echo the requested value even when it did
+	// not persist. Always verify persisted state via readback.
+	current, err := client.GetIndexer(idx.ID)
+	if err != nil {
+		return nil, fmt.Errorf("readback enabled=%t: %w", want, err)
 	}
-	if err := client.SetEnabled(*idx, want); err != nil {
+	if current.Enable == want {
+		return current, nil
+	}
+	if err := client.SetEnabled(*current, want); err != nil {
 		return nil, fmt.Errorf("set enabled=%t: %w", want, err)
 	}
 	refreshed, err := client.GetIndexer(idx.ID)
