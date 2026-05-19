@@ -89,14 +89,15 @@ type TrackerEntry struct {
 	UserStats      *UserStats `json:"user_stats,omitempty"` // most recent stats fetch success
 	SyncError      string     `json:"sync_error,omitempty"` // error from most recent attempt
 
-	// ProwlarrSettings is the full desired config we manage in Prowlarr,
-	// keyed by field name (matches the Prowlarr schema field names). Written
-	// on every successful add or sync; read back to pre-fill the config form
-	// and to compute diffs. Never sent to the frontend — only submitted to
-	// the Prowlarr API.
-	ProwlarrSettings  map[string]string `json:"prowlarr_settings,omitempty"`
-	ProwlarrLastSync  *time.Time        `json:"prowlarr_last_sync,omitempty"`
-	ProwlarrSyncError string            `json:"prowlarr_sync_error,omitempty"`
+	// ProwlarrSettings is the full desired schema-field config we manage in
+	// Prowlarr, keyed by field name. Root indexer config that Prowlarr keeps
+	// outside fields (name, app profile, tags) is stored separately below.
+	ProwlarrSettings     map[string]string `json:"prowlarr_settings,omitempty"`
+	ProwlarrName         string            `json:"prowlarr_name,omitempty"`
+	ProwlarrAppProfileID int               `json:"prowlarr_app_profile_id,omitempty"`
+	ProwlarrTags         []int             `json:"prowlarr_tags,omitempty"`
+	ProwlarrLastSync     *time.Time        `json:"prowlarr_last_sync,omitempty"`
+	ProwlarrSyncError    string            `json:"prowlarr_sync_error,omitempty"`
 
 	// Autobrr integration — parallel structure to Prowlarr above. AutobrrID
 	// is the indexer ID inside Autobrr; AutobrrIdentifier is the autobrr

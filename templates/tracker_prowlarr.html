@@ -75,6 +75,63 @@
     <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/prowlarr" class="config-form">
       <div class="config-row prowlarr-field-row">
         <div class="field">
+          <label class="field-label">Name</label>
+          <input class="field-input" type="text" name="prowlarr_name" value="{{ .BaseName }}" autocomplete="off">
+          <p class="config-hint">PTV appends [ptv] when syncing this indexer.</p>
+        </div>
+      </div>
+
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Enable</label>
+          <input type="hidden" name="enabled" value="false">
+          <label class="checkline">
+            <input type="checkbox" name="enabled" value="true" {{ if .EnableValue }}checked{{ end }}>
+            <span>enabled in Prowlarr</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Sync Profile</label>
+          {{ if .AppProfiles }}
+            <select class="field-input field-select" name="app_profile_id">
+              {{ $selectedProfile := .AppProfileID }}
+              {{ range .AppProfiles }}
+              <option value="{{ .ID }}" {{ if eq .ID $selectedProfile }}selected{{ end }}>{{ .Name }}</option>
+              {{ end }}
+            </select>
+          {{ else }}
+            <input type="hidden" name="app_profile_id" value="{{ .AppProfileID }}">
+            <div class="field-authoritative">No profiles available</div>
+            <p class="config-hint">Configure sync profiles in Prowlarr directly.</p>
+            {{ if .ProfilesError }}<p class="config-hint">{{ .ProfilesError }}</p>{{ end }}
+          {{ end }}
+        </div>
+      </div>
+
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">Tags</label>
+          {{ if .Tags }}
+            {{ $selectedTags := .Tracker.ProwlarrTags }}
+            {{ range .Tags }}
+            <label class="checkline">
+              <input type="checkbox" name="tag" value="{{ .ID }}" {{ if hasInt $selectedTags .ID }}checked{{ end }}>
+              <span>{{ .Label }}</span>
+            </label>
+            {{ end }}
+          {{ else }}
+            <div class="field-authoritative">No tags available</div>
+            <p class="config-hint">Configure tags in Prowlarr directly.</p>
+            {{ if .TagsError }}<p class="config-hint">{{ .TagsError }}</p>{{ end }}
+          {{ end }}
+        </div>
+      </div>
+
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
           <label class="field-label">URL</label>
           {{ $currentURL := .Tracker.TrackerURL }}
           {{ if gt (len .URLs) 1 }}

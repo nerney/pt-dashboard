@@ -1,9 +1,9 @@
 // Package prowlarr is a minimal HTTP client for the Prowlarr REST API.
 //
 // PTV uses Prowlarr to import already-configured indexers and to push/update
-// managed trackers (credentials, enable/disable state) into Prowlarr. Only
-// the indexer resource is touched — no tags, download clients, or other
-// Prowlarr features.
+// managed trackers into Prowlarr. PTV updates indexer resources and reads
+// app profiles/tags for indexer configuration; it does not create or delete
+// Prowlarr tags, download clients, or other Prowlarr resources.
 package prowlarr
 
 import (
@@ -85,6 +85,18 @@ type Indexer struct {
 type AppProfile struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+}
+
+type Tag struct {
+	ID    int    `json:"id"`
+	Label string `json:"label"`
+}
+
+type IndexerRootConfig struct {
+	Name         string
+	Enable       bool
+	AppProfileID int
+	Tags         []int
 }
 
 func (c *Client) do(method, path string, body io.Reader) (*http.Response, []byte, error) {
@@ -207,6 +219,21 @@ func (c *Client) GetAppProfiles() ([]AppProfile, error) {
 	return out, nil
 }
 
+func (c *Client) GetTags() ([]Tag, error) {
+	resp, body, err := c.do("GET", "/api/v1/tag", nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("prowlarr returned HTTP %d", resp.StatusCode)
+	}
+	var out []Tag
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("parse: %w", err)
+	}
+	return out, nil
+}
+
 func (c *Client) FirstAppProfileID() (int, error) {
 	profiles, err := c.GetAppProfiles()
 	if err != nil {
@@ -242,16 +269,34 @@ func (c *Client) AddIndexerWithFields(schema IndexerSchema, fields []SchemaField
 	if strings.TrimSpace(name) == "" {
 		name = schema.Name
 	}
+	return c.AddIndexerWithRoot(schema, fields, IndexerRootConfig{
+		Name:         name,
+		Enable:       true,
+		AppProfileID: schema.AppProfileID,
+		Tags:         []int{},
+	})
+}
+
+func (c *Client) AddIndexerWithRoot(schema IndexerSchema, fields []SchemaField, root IndexerRootConfig) (*Indexer, error) {
+	if strings.TrimSpace(root.Name) == "" {
+		root.Name = schema.Name
+	}
+	if root.AppProfileID <= 0 {
+		root.AppProfileID = schema.AppProfileID
+	}
+	if root.Tags == nil {
+		root.Tags = []int{}
+	}
 	payload := map[string]interface{}{
-		"name":               name,
-		"enable":             true,
+		"name":               root.Name,
+		"enable":             root.Enable,
 		"implementation":     schema.Implementation,
 		"implementationName": schema.ImplementationName,
 		"configContract":     schema.ConfigContract,
-		"appProfileId":       schema.AppProfileID,
+		"appProfileId":       root.AppProfileID,
 		"priority":           schema.Priority,
 		"fields":             fields,
-		"tags":               []int{},
+		"tags":               root.Tags,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -299,6 +344,27 @@ func (c *Client) UpdateIndexerWithFields(indexer Indexer, fields []SchemaField, 
 	if strings.TrimSpace(name) != "" {
 		indexer.Name = name
 	}
+	indexer.Fields = fields
+	return c.UpdateIndexerWithRoot(indexer, fields, IndexerRootConfig{
+		Name:         indexer.Name,
+		Enable:       indexer.Enable,
+		AppProfileID: indexer.AppProfileID,
+		Tags:         indexer.Tags,
+	})
+}
+
+func (c *Client) UpdateIndexerWithRoot(indexer Indexer, fields []SchemaField, root IndexerRootConfig) (*Indexer, error) {
+	if strings.TrimSpace(root.Name) != "" {
+		indexer.Name = root.Name
+	}
+	indexer.Enable = root.Enable
+	if root.AppProfileID > 0 {
+		indexer.AppProfileID = root.AppProfileID
+	}
+	if root.Tags == nil {
+		root.Tags = []int{}
+	}
+	indexer.Tags = root.Tags
 	indexer.Fields = fields
 	data, err := json.Marshal(indexer)
 	if err != nil {

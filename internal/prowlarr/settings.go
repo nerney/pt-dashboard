@@ -117,6 +117,71 @@ func ManagedIndexerName(name string) string {
 	return name + ManagedNameSuffix
 }
 
+func BaseIndexerName(name string) string {
+	name = strings.TrimSpace(name)
+	suffix := strings.TrimSpace(ManagedNameSuffix)
+	if strings.HasSuffix(strings.ToLower(name), strings.ToLower(suffix)) {
+		return strings.TrimSpace(name[:len(name)-len(suffix)])
+	}
+	return name
+}
+
+func RootConfig(baseName string, enabled bool, appProfileID int, tags []int) IndexerRootConfig {
+	return IndexerRootConfig{
+		Name:         ManagedIndexerName(baseName),
+		Enable:       enabled,
+		AppProfileID: appProfileID,
+		Tags:         append([]int(nil), tags...),
+	}
+}
+
+func RootConfigFromIndexer(idx Indexer) IndexerRootConfig {
+	return IndexerRootConfig{
+		Name:         idx.Name,
+		Enable:       idx.Enable,
+		AppProfileID: idx.AppProfileID,
+		Tags:         append([]int(nil), idx.Tags...),
+	}
+}
+
+func RootConfigsEqual(left, right IndexerRootConfig) bool {
+	return len(DiffRootConfig(left, right)) == 0
+}
+
+func DiffRootConfig(left, right IndexerRootConfig) []string {
+	var diff []string
+	if strings.TrimSpace(left.Name) != strings.TrimSpace(right.Name) {
+		diff = append(diff, "Name")
+	}
+	if left.Enable != right.Enable {
+		diff = append(diff, "Enable")
+	}
+	if left.AppProfileID != right.AppProfileID {
+		diff = append(diff, "Sync Profile")
+	}
+	if !intSetsEqual(left.Tags, right.Tags) {
+		diff = append(diff, "Tags")
+	}
+	return diff
+}
+
+func intSetsEqual(left, right []int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[int]int, len(left))
+	for _, v := range left {
+		counts[v]++
+	}
+	for _, v := range right {
+		counts[v]--
+		if counts[v] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // WithCoreCredentials returns schema-backed settings with PTV's core tracker
 // URL/API key overlaid onto Prowlarr's matching URL/key fields.
 func WithCoreCredentials(schema IndexerSchema, settings map[string]string, trackerURL, apiKey string) map[string]string {

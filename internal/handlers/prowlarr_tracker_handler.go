@@ -16,7 +16,14 @@ type prowlarrTrackerData struct {
 	Tracker         *config.TrackerEntry
 	ProwlarrEnabled bool
 	SchemaError     string
+	ProfilesError   string
+	TagsError       string
 	URLs            []string
+	BaseName        string
+	EnableValue     bool
+	AppProfileID    int
+	AppProfiles     []prowlarr.AppProfile
+	Tags            []prowlarr.Tag
 	Fields          []prowlarr.SettingField
 	FlashError      string
 	FlashSuccess    string
@@ -51,6 +58,10 @@ func (h *Handler) configTrackerProwlarrPost(w http.ResponseWriter, r *http.Reque
 	if newURL := strings.TrimSpace(r.FormValue("url")); newURL != "" {
 		cfg.Trackers[idx].TrackerURL = newURL
 	}
+	cfg.Trackers[idx].ProwlarrName = strings.TrimSpace(r.FormValue("prowlarr_name"))
+	cfg.Trackers[idx].Enabled = r.FormValue("enabled") == "true"
+	cfg.Trackers[idx].ProwlarrAppProfileID = formInt(r.FormValue("app_profile_id"))
+	cfg.Trackers[idx].ProwlarrTags = submittedIntSlice(r.Form["tag"])
 	schema, err := h.prowlarrSchemaByName(cfg.Trackers[idx].DefinitionName)
 	if err != nil {
 		flash(w, r, trackerProwlarrPath(idx), "", "Schema unavailable — re-import from Prowlarr when available: "+err.Error())
@@ -100,13 +111,30 @@ func (h *Handler) prowlarrTrackerData(idx int, t *config.TrackerEntry, cfg *conf
 		Section:         "prowlarr",
 	}
 	data.URLs = h.trackerDefinitionURLs(t.DefinitionName)
+	data.BaseName = prowlarr.BaseIndexerName(prowlarrBaseName(t))
+	data.EnableValue = t.Enabled || t.ProwlarrID == 0
 	if !data.ProwlarrEnabled {
 		return data
+	}
+	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
+	if profiles, err := client.GetAppProfiles(); err == nil {
+		data.AppProfiles = profiles
+	} else {
+		data.ProfilesError = err.Error()
+	}
+	if tags, err := client.GetTags(); err == nil {
+		data.Tags = tags
+	} else {
+		data.TagsError = err.Error()
 	}
 	schema, err := h.prowlarrSchemaByName(t.DefinitionName)
 	if err != nil {
 		data.SchemaError = "Schema unavailable — re-import from Prowlarr when available: " + err.Error()
 		return data
+	}
+	data.AppProfileID = t.ProwlarrAppProfileID
+	if data.AppProfileID == 0 {
+		data.AppProfileID = schema.AppProfileID
 	}
 	settings := prowlarr.MergeSettings(*schema, t.ProwlarrSettings, nil)
 	data.Fields = prowlarr.RenderFields(*schema, settings)
@@ -149,19 +177,25 @@ func (h *Handler) pushTrackerProwlarrConfig(cfg *config.Config, i int, schema pr
 	settings := prowlarr.WithCoreCredentials(schema, t.ProwlarrSettings, t.TrackerURL, t.APIKey)
 	fields := prowlarr.FieldsForPayload(schema, settings)
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-	managedName := prowlarr.ManagedIndexerName(t.Name)
+	root, err := h.prowlarrRootConfig(cfg, i, schema, client)
+	if err != nil {
+		return err
+	}
 
 	if t.ProwlarrID != 0 {
 		existing, err := client.GetIndexer(t.ProwlarrID)
 		if err != nil {
 			return err
 		}
-		updated, err := client.UpdateIndexerWithFields(*existing, fields, managedName)
+		updated, err := client.UpdateIndexerWithRoot(*existing, fields, root)
 		if err != nil {
 			return err
 		}
 		now := time.Now()
 		cfg.Trackers[i].Enabled = updated.Enable
+		cfg.Trackers[i].ProwlarrName = prowlarr.BaseIndexerName(updated.Name)
+		cfg.Trackers[i].ProwlarrAppProfileID = updated.AppProfileID
+		cfg.Trackers[i].ProwlarrTags = append([]int(nil), updated.Tags...)
 		returned := prowlarr.SettingsFromFields(schema, updated.Fields)
 		cfg.Trackers[i].ProwlarrSettings = prowlarr.MergeSettings(schema, settings, returned)
 		cfg.Trackers[i].ProwlarrLastSync = &now
@@ -178,18 +212,69 @@ func (h *Handler) pushTrackerProwlarrConfig(cfg *config.Config, i int, schema pr
 		}
 	}
 	schema = prowlarr.IndexerSchemaForPayload(schema, appProfileID)
-	updated, err := client.AddIndexerWithFields(schema, fields, managedName)
+	root.AppProfileID = appProfileID
+	updated, err := client.AddIndexerWithRoot(schema, fields, root)
 	if err != nil {
 		return err
 	}
 	now := time.Now()
 	cfg.Trackers[i].ProwlarrID = updated.ID
 	cfg.Trackers[i].Enabled = updated.Enable
+	cfg.Trackers[i].ProwlarrName = prowlarr.BaseIndexerName(updated.Name)
+	cfg.Trackers[i].ProwlarrAppProfileID = updated.AppProfileID
+	cfg.Trackers[i].ProwlarrTags = append([]int(nil), updated.Tags...)
 	returned := prowlarr.SettingsFromFields(schema, updated.Fields)
 	cfg.Trackers[i].ProwlarrSettings = prowlarr.MergeSettings(schema, settings, returned)
 	cfg.Trackers[i].ProwlarrLastSync = &now
 	cfg.Trackers[i].ProwlarrSyncError = ""
 	return nil
+}
+
+func (h *Handler) prowlarrRootConfig(cfg *config.Config, i int, schema prowlarr.IndexerSchema, client *prowlarr.Client) (prowlarr.IndexerRootConfig, error) {
+	t := cfg.Trackers[i]
+	name := prowlarrBaseName(t)
+	enabled := t.Enabled
+	if t.ProwlarrID == 0 {
+		enabled = true
+	}
+	appProfileID := t.ProwlarrAppProfileID
+	if appProfileID <= 0 {
+		appProfileID = schema.AppProfileID
+	}
+	if appProfileID <= 0 {
+		var err error
+		appProfileID, err = client.FirstAppProfileID()
+		if err != nil {
+			return prowlarr.IndexerRootConfig{}, err
+		}
+	}
+	cfg.Trackers[i].ProwlarrName = prowlarr.BaseIndexerName(name)
+	cfg.Trackers[i].ProwlarrAppProfileID = appProfileID
+	cfg.Trackers[i].Enabled = enabled
+	return prowlarr.RootConfig(name, enabled, appProfileID, t.ProwlarrTags), nil
+}
+
+func prowlarrBaseName(t *config.TrackerEntry) string {
+	if strings.TrimSpace(t.ProwlarrName) != "" {
+		return t.ProwlarrName
+	}
+	return t.Name
+}
+
+func formInt(s string) int {
+	n, _ := strconv.Atoi(strings.TrimSpace(s))
+	return n
+}
+
+func submittedIntSlice(values []string) []int {
+	out := make([]int, 0, len(values))
+	for _, value := range values {
+		n, err := strconv.Atoi(value)
+		if err == nil && n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func trackerProwlarrPath(idx int) string {
