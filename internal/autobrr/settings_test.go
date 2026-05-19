@@ -133,13 +133,20 @@ func TestRenderFieldsHandlesBothLayers(t *testing.T) {
 
 	// Verify defaults are applied
 	found := false
+	required := false
 	for _, f := range got {
 		if f.Name == "maxDelay" && f.Value == "10" {
 			found = true
 		}
+		if f.Name == "rsskey" && f.Required {
+			required = true
+		}
 	}
 	if !found {
 		t.Fatalf("Default value for maxDelay not applied")
+	}
+	if !required {
+		t.Fatalf("Required flag for rsskey not propagated")
 	}
 }
 
