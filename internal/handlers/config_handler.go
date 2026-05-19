@@ -253,6 +253,7 @@ func (h *Handler) configProwlarrPost(w http.ResponseWriter, r *http.Request) {
 		flash(w, r, pathConfigProwlarr, "", "Save failed: "+err.Error())
 		return
 	}
+	h.invalidateProwlarrMetadataCache()
 	h.log.Info("CONFIG", "Prowlarr settings saved")
 	go h.warmProwlarrSchemas()
 	flash(w, r, pathConfigProwlarr, "Prowlarr settings saved.", "")
