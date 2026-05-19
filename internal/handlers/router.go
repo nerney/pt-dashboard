@@ -60,6 +60,10 @@ type Handler struct {
 	// prowlarr schema cache — populated by warmProwlarrSchemas.
 	pSchemasMu sync.RWMutex
 	pSchemas   map[string]prowlarr.IndexerSchema
+
+	pMetadataMu  sync.RWMutex
+	pAppProfiles cachedAppProfiles
+	pTags        cachedTags
 }
 
 // NewRouter builds the fully-wired HTTP handler tree:

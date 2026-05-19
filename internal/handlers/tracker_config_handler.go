@@ -84,12 +84,15 @@ func (h *Handler) buildUnifiedTrackerConfigData(idx int, cfg *config.Config) uni
 	}
 
 	if data.ProwlarrEnabled {
-		client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-		if profiles, err := client.GetAppProfiles(); err == nil {
+		if profiles, err := h.prowlarrAppProfiles(cfg); err == nil {
 			data.ProwlarrAppProfiles = profiles
+		} else {
+			h.log.Err("PROWLARR", "app profiles: "+err.Error())
 		}
-		if tags, err := client.GetTags(); err == nil {
+		if tags, err := h.prowlarrTags(cfg); err == nil {
 			data.ProwlarrTags = tags
+		} else {
+			h.log.Err("PROWLARR", "tags: "+err.Error())
 		}
 		if schema, err := h.prowlarrSchemaByName(t.DefinitionName); err == nil {
 			data.ProwlarrSchema = schema
