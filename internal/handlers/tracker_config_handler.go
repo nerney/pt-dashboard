@@ -61,8 +61,11 @@ type unifiedTrackerConfigData struct {
 	TrackerIdx            int
 	Tracker               *config.TrackerEntry
 	URLs                  []string
+	SubmittedURL          string
+	SubmittedAPIKey       string
 	ProwlarrEnabled       bool
 	ProwlarrSchema        *prowlarr.IndexerSchema
+	ProwlarrBaseName      string
 	ProwlarrFields        []prowlarr.SettingField
 	ProwlarrAppProfiles   []prowlarr.AppProfile
 	ProwlarrTags          []prowlarr.Tag
@@ -83,18 +86,22 @@ func (h *Handler) trackerConfigPage(w http.ResponseWriter, r *http.Request) {
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
+	data := h.buildUnifiedTrackerConfigData(idx, cfg)
+	data.FlashError = r.URL.Query().Get("err")
+	data.FlashSuccess = r.URL.Query().Get("ok")
+	h.render(w, "tracker_config_unified", data)
+}
 
+func (h *Handler) buildUnifiedTrackerConfigData(idx int, cfg *config.Config) unifiedTrackerConfigData {
+	t := cfg.Trackers[idx]
 	data := unifiedTrackerConfigData{
 		TrackerIdx:      idx,
-		Tracker:         cfg.Trackers[idx],
-		URLs:            h.trackerDefinitionURLs(cfg.Trackers[idx].DefinitionName),
+		Tracker:         t,
+		URLs:            h.trackerDefinitionURLs(t.DefinitionName),
 		ProwlarrEnabled: cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != "",
 		AutobrrEnabled:  cfg.AutobrrEnabled && cfg.AutobrrURL != "" && cfg.AutobrrAPIKey != "",
-		FlashError:      r.URL.Query().Get("err"),
-		FlashSuccess:    r.URL.Query().Get("ok"),
 	}
 
-	// Load Prowlarr schema and metadata if enabled
 	if data.ProwlarrEnabled {
 		client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 		if profiles, err := client.GetAppProfiles(); err == nil {
@@ -103,25 +110,29 @@ func (h *Handler) trackerConfigPage(w http.ResponseWriter, r *http.Request) {
 		if tags, err := client.GetTags(); err == nil {
 			data.ProwlarrTags = tags
 		}
-		if schema, err := h.prowlarrSchemaByName(cfg.Trackers[idx].DefinitionName); err == nil {
+		if schema, err := h.prowlarrSchemaByName(t.DefinitionName); err == nil {
 			data.ProwlarrSchema = schema
-			data.ProwlarrFields = prowlarr.RenderFields(*schema, cfg.Trackers[idx].ProwlarrSettings)
+			data.ProwlarrFields = prowlarr.RenderFields(*schema, t.ProwlarrSettings)
 		} else {
 			data.ProwlarrError = "Schema unavailable: " + err.Error()
 		}
+		baseName := t.ProwlarrName
+		if baseName == "" {
+			baseName = t.Name
+		}
+		data.ProwlarrBaseName = prowlarr.BaseIndexerName(baseName)
 	}
 
-	// Load Autobrr definition if enabled
 	if data.AutobrrEnabled {
-		if def := h.autobrrDefFor(cfg.Trackers[idx], cfg.Trackers[idx].AutobrrIdentifier); def != nil {
+		if def := h.autobrrDefFor(t, t.AutobrrIdentifier); def != nil {
 			data.AutobrrDefinition = def
-			data.AutobrrFields = autobrr.RenderFields(*def, cfg.Trackers[idx].AutobrrSettings)
+			data.AutobrrFields = autobrr.RenderFields(*def, t.AutobrrSettings)
 		} else {
 			data.AutobrrError = "Definition not available"
 		}
 	}
 
-	h.render(w, "tracker_config_unified", data)
+	return data
 }
 
 func (h *Handler) trackerPTVConfigPage(w http.ResponseWriter, r *http.Request) {
@@ -321,51 +332,21 @@ func trackerPTVConfigPath(idx int) string {
 }
 
 func trackerProwlarrDiffPath(idx int) string {
-	return trackerProwlarrPath(idx) + "/diff"
+	return "/tracker/" + strconv.Itoa(idx) + "/config/prowlarr/diff"
 }
 
+// trackerAutobrrPath returns the unified tracker config page (where the
+// Autobrr section lives). Used for redirects after Autobrr POST actions.
 func trackerAutobrrPath(idx int) string {
-	return "/tracker/" + strconv.Itoa(idx) + "/config/autobrr"
+	return trackerConfigPath(idx)
 }
 
-func (h *Handler) renderTrackerConfigWithError(w http.ResponseWriter, r *http.Request, idx int, cfg *config.Config, validationError string) {
-	data := unifiedTrackerConfigData{
-		TrackerIdx:            idx,
-		Tracker:               cfg.Trackers[idx],
-		URLs:                  h.trackerDefinitionURLs(cfg.Trackers[idx].DefinitionName),
-		ProwlarrEnabled:       cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != "",
-		AutobrrEnabled:        cfg.AutobrrEnabled && cfg.AutobrrURL != "" && cfg.AutobrrAPIKey != "",
-		ValidationError:       validationError,
-		ValidationTrackerName: cfg.Trackers[idx].Name,
-	}
-
-	// Load Prowlarr schema and metadata if enabled
-	if data.ProwlarrEnabled {
-		client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
-		if profiles, err := client.GetAppProfiles(); err == nil {
-			data.ProwlarrAppProfiles = profiles
-		}
-		if tags, err := client.GetTags(); err == nil {
-			data.ProwlarrTags = tags
-		}
-		if schema, err := h.prowlarrSchemaByName(cfg.Trackers[idx].DefinitionName); err == nil {
-			data.ProwlarrSchema = schema
-			data.ProwlarrFields = prowlarr.RenderFields(*schema, cfg.Trackers[idx].ProwlarrSettings)
-		} else {
-			data.ProwlarrError = "Schema unavailable: " + err.Error()
-		}
-	}
-
-	// Load Autobrr definition if enabled
-	if data.AutobrrEnabled {
-		if def := h.autobrrDefFor(cfg.Trackers[idx], cfg.Trackers[idx].AutobrrIdentifier); def != nil {
-			data.AutobrrDefinition = def
-			data.AutobrrFields = autobrr.RenderFields(*def, cfg.Trackers[idx].AutobrrSettings)
-		} else {
-			data.AutobrrError = "Definition not available"
-		}
-	}
-
+func (h *Handler) renderTrackerConfigWithError(w http.ResponseWriter, r *http.Request, idx int, cfg *config.Config, submittedURL, submittedKey, validationError string) {
+	data := h.buildUnifiedTrackerConfigData(idx, cfg)
+	data.SubmittedURL = submittedURL
+	data.SubmittedAPIKey = submittedKey
+	data.ValidationError = validationError
+	data.ValidationTrackerName = cfg.Trackers[idx].Name
 	h.render(w, "tracker_config_unified", data)
 }
 

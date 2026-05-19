@@ -407,8 +407,8 @@ func (h *Handler) configTrackerUpdate(w http.ResponseWriter, r *http.Request) {
 		stats, vErr := h.validateTracker(cfg.Trackers[idx].TrackerType, effURL, effKey)
 		if vErr != nil {
 			h.log.Err("CONFIG", fmt.Sprintf("Validation failed for %q: %s", name, vErr.Error()))
-			// Render the config page with validation error
-			h.renderTrackerConfigWithError(w, r, idx, cfg, vErr.Error())
+			// Render the config page with validation error, preserving user input
+			h.renderTrackerConfigWithError(w, r, idx, cfg, newURL, newKey, vErr.Error())
 			return
 		}
 		now := time.Now()

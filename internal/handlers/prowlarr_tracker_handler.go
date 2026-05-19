@@ -279,6 +279,9 @@ func submittedIntSlice(values []string) []int {
 	return out
 }
 
+// trackerProwlarrPath returns the unified tracker config page where the
+// Prowlarr section is collapsible. Used for redirects after Prowlarr POST
+// actions so the user lands back on the consolidated config view.
 func trackerProwlarrPath(idx int) string {
-	return "/tracker/" + strconv.Itoa(idx) + "/config/prowlarr"
+	return trackerConfigPath(idx)
 }
