@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/nerney/ptv/internal/auth"
+	"github.com/nerney/ptv/internal/autobrrdefs"
 	"github.com/nerney/ptv/internal/config"
 	"github.com/nerney/ptv/internal/defs"
 	"github.com/nerney/ptv/internal/logger"
@@ -40,12 +41,13 @@ const (
 // Handler bundles every dependency a route needs. Methods on Handler back
 // every route in NewRouter.
 type Handler struct {
-	store    *config.Store
-	syncer   *defs.Syncer
-	log      *logger.Logger
-	acl      *netacl.ACL
-	sessions *auth.Manager
-	limiter  *auth.RateLimiter
+	store         *config.Store
+	syncer        *defs.Syncer
+	autobrrSyncer *autobrrdefs.Syncer
+	log           *logger.Logger
+	acl           *netacl.ACL
+	sessions      *auth.Manager
+	limiter       *auth.RateLimiter
 
 	templates map[string]*template.Template
 	fs        embed.FS
@@ -72,15 +74,16 @@ type Handler struct {
 // Pre-init bootstrap: when /config/.initialized is missing, the ACL is
 // flipped into preInit mode (allows any IP) and a goroutine arms the
 // setupWindow timer.
-func NewRouter(store *config.Store, syncer *defs.Syncer, fs embed.FS) http.Handler {
+func NewRouter(store *config.Store, syncer *defs.Syncer, autobrrSyncer *autobrrdefs.Syncer, fs embed.FS) http.Handler {
 	log := logger.New()
 	h := &Handler{
-		store:   store,
-		syncer:  syncer,
-		log:     log,
-		acl:     netacl.New(),
-		limiter: auth.NewRateLimiter(),
-		fs:      fs,
+		store:         store,
+		syncer:        syncer,
+		autobrrSyncer: autobrrSyncer,
+		log:           log,
+		acl:           netacl.New(),
+		limiter:       auth.NewRateLimiter(),
+		fs:            fs,
 	}
 
 	// onExpire fires when a session is torn down (logout, idle/absolute

@@ -153,7 +153,7 @@ func (s *Syncer) gitClone(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(s.dir), 0700); err != nil {
 		return err
 	}
-	return s.git(ctx, "clone", "--depth=1", "--branch=master", repoURL, s.dir)
+	return s.git(ctx, "clone", "--depth=1", repoURL, s.dir)
 }
 
 func (s *Syncer) gitPull(ctx context.Context) error {

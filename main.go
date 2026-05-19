@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nerney/ptv/internal/autobrrdefs"
 	"github.com/nerney/ptv/internal/config"
 	"github.com/nerney/ptv/internal/defs"
 	"github.com/nerney/ptv/internal/handlers"
@@ -51,7 +52,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	router := handlers.NewRouter(store, syncer, assets)
+	// Autobrr definitions are optional — a clone failure is logged but does
+	// not block startup. The catalog becomes available once the goroutine
+	// completes, well before the user reaches any autobrr config UI.
+	autobrrSyncer := autobrrdefs.New(configDir, log)
+	autobrrSyncer.Start(context.Background())
+
+	router := handlers.NewRouter(store, syncer, autobrrSyncer, assets)
 
 	srv := &http.Server{
 		Addr:         "[::]:8008",
