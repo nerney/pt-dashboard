@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/nerney/ptv/internal/autobrr"
+	"github.com/nerney/ptv/internal/autobrrdefs"
 	"github.com/nerney/ptv/internal/config"
 	"github.com/nerney/ptv/internal/defs"
 	"github.com/nerney/ptv/internal/prowlarr"
@@ -21,11 +24,6 @@ type trackerConfigData struct {
 	FlashSuccess    string
 }
 
-type trackerPTVConfigData struct {
-	trackerConfigData
-	URLs []string
-}
-
 type trackerAddData struct {
 	Rows         []configRow
 	DefsState    defs.State
@@ -36,14 +34,31 @@ type trackerAddData struct {
 }
 
 type prowlarrDiffData struct {
-	TrackerIdx      int
-	Tracker         *config.TrackerEntry
-	ProwlarrEnabled bool
-	Row             prowlarrSyncRow
-	FlashError      string
-	FlashSuccess    string
-	ActiveTab       string
-	Section         string
+	trackerConfigData
+	Row prowlarrSyncRow
+}
+
+type unifiedTrackerConfigData struct {
+	TrackerIdx            int
+	Tracker               *config.TrackerEntry
+	URLs                  []string
+	SubmittedURL          string
+	SubmittedAPIKey       string
+	ProwlarrEnabled       bool
+	ProwlarrSchema        *prowlarr.IndexerSchema
+	ProwlarrBaseName      string
+	ProwlarrFields        []prowlarr.SettingField
+	ProwlarrAppProfiles   []prowlarr.AppProfile
+	ProwlarrTags          []prowlarr.Tag
+	ProwlarrError         string
+	AutobrrEnabled        bool
+	AutobrrDefinition     *autobrrdefs.Def
+	AutobrrFields         []autobrr.SettingField
+	AutobrrError          string
+	FlashError            string
+	FlashSuccess          string
+	ValidationError       string
+	ValidationTrackerName string
 }
 
 func (h *Handler) trackerConfigPage(w http.ResponseWriter, r *http.Request) {
@@ -52,34 +67,113 @@ func (h *Handler) trackerConfigPage(w http.ResponseWriter, r *http.Request) {
 		flash(w, r, "/", "", "invalid tracker index")
 		return
 	}
-	data := trackerPTVConfigData{
-		trackerConfigData: h.trackerConfigData(idx, cfg.Trackers[idx], cfg, r, "ptv"),
-		URLs:              h.trackerDefinitionURLs(cfg.Trackers[idx].DefinitionName),
-	}
-	h.render(w, "tracker_ptv_config", data)
+	data := h.buildUnifiedTrackerConfigData(idx, cfg)
+	data.FlashError = r.URL.Query().Get("err")
+	data.FlashSuccess = r.URL.Query().Get("ok")
+	h.render(w, "tracker_config_unified", data)
 }
 
-func (h *Handler) trackerPTVConfigPage(w http.ResponseWriter, r *http.Request) {
-	idx, cfg, ok := h.trackerIndex(r)
-	if !ok {
-		flash(w, r, "/", "", "invalid tracker index")
-		return
+func (h *Handler) buildUnifiedTrackerConfigData(idx int, cfg *config.Config) unifiedTrackerConfigData {
+	t := cfg.Trackers[idx]
+	data := unifiedTrackerConfigData{
+		TrackerIdx:      idx,
+		Tracker:         t,
+		URLs:            h.trackerDefinitionURLs(t.DefinitionName),
+		ProwlarrEnabled: cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != "",
+		AutobrrEnabled:  cfg.AutobrrEnabled && cfg.AutobrrURL != "" && cfg.AutobrrAPIKey != "",
 	}
-	data := trackerPTVConfigData{
-		trackerConfigData: h.trackerConfigData(idx, cfg.Trackers[idx], cfg, r, "ptv"),
-		URLs:              h.trackerDefinitionURLs(cfg.Trackers[idx].DefinitionName),
+
+	if data.ProwlarrEnabled {
+		client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
+		if profiles, err := client.GetAppProfiles(); err == nil {
+			data.ProwlarrAppProfiles = profiles
+		}
+		if tags, err := client.GetTags(); err == nil {
+			data.ProwlarrTags = tags
+		}
+		if schema, err := h.prowlarrSchemaByName(t.DefinitionName); err == nil {
+			data.ProwlarrSchema = schema
+			data.ProwlarrFields = prowlarr.RenderFields(*schema, t.ProwlarrSettings)
+		} else {
+			data.ProwlarrError = "Schema unavailable: " + err.Error()
+		}
+		baseName := t.ProwlarrName
+		if baseName == "" {
+			baseName = t.Name
+		}
+		data.ProwlarrBaseName = prowlarr.BaseIndexerName(baseName)
 	}
-	h.render(w, "tracker_ptv_config", data)
+
+	if data.AutobrrEnabled {
+		if def := h.autobrrDefFor(t, t.AutobrrIdentifier); def != nil {
+			data.AutobrrDefinition = def
+			data.AutobrrFields = autobrr.RenderFields(*def, t.AutobrrSettings)
+		} else {
+			data.AutobrrError = "Definition not available"
+		}
+	}
+
+	return data
 }
 
-func (h *Handler) trackerAutobrrConfigPage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) trackerAutobrrConfigPost(w http.ResponseWriter, r *http.Request) {
 	idx, cfg, ok := h.trackerIndex(r)
 	if !ok {
-		flash(w, r, "/", "", "invalid tracker index")
+		flash(w, r, pathConfigTrackers, "", "invalid tracker index")
 		return
 	}
-	data := h.trackerConfigData(idx, cfg.Trackers[idx], cfg, r, "autobrr")
-	h.render(w, "tracker_autobrr_config", data)
+	if err := r.ParseForm(); err != nil {
+		flash(w, r, trackerConfigPath(idx), "", "invalid form")
+		return
+	}
+	if !cfg.AutobrrEnabled || cfg.AutobrrURL == "" || cfg.AutobrrAPIKey == "" {
+		flash(w, r, pathConfigAutobrr, "", "Autobrr not enabled")
+		return
+	}
+
+	def := h.autobrrDefFor(cfg.Trackers[idx], cfg.Trackers[idx].AutobrrIdentifier)
+	if def == nil {
+		flash(w, r, trackerConfigPath(idx), "", "Definition not available")
+		return
+	}
+
+	submitted := submittedAutobrrSettings(r, *def)
+	cfg.Trackers[idx].AutobrrSettings = autobrr.MergeSettings(*def, cfg.Trackers[idx].AutobrrSettings, submitted)
+
+	if err := h.store.Save(cfg); err != nil {
+		flash(w, r, trackerConfigPath(idx), "", "Save failed: "+err.Error())
+		return
+	}
+
+	if r.FormValue("action") != "save_push" {
+		h.log.Info("CONFIG", fmt.Sprintf("Saved Autobrr settings for %q", cfg.Trackers[idx].Name))
+		flash(w, r, trackerConfigPath(idx), "Autobrr settings saved.", "")
+		return
+	}
+
+	if cfg.Trackers[idx].AutobrrID == 0 {
+		flash(w, r, trackerConfigPath(idx), "", "Tracker not linked to Autobrr")
+		return
+	}
+
+	if err := h.pushTrackerAutobrrConfig(cfg, idx, *def); err != nil {
+		cfg.Trackers[idx].AutobrrSyncError = err.Error()
+		if saveErr := h.store.Save(cfg); saveErr != nil {
+			flash(w, r, trackerConfigPath(idx), "", "Push failed: "+err.Error()+"; save failed: "+saveErr.Error())
+			return
+		}
+		h.log.Err("CONFIG", fmt.Sprintf("Autobrr push failed for %q: %s", cfg.Trackers[idx].Name, err.Error()))
+		flash(w, r, trackerConfigPath(idx), "", "Autobrr push failed: "+err.Error())
+		return
+	}
+
+	if err := h.store.Save(cfg); err != nil {
+		flash(w, r, trackerConfigPath(idx), "", "Push succeeded but save failed: "+err.Error())
+		return
+	}
+
+	h.log.Info("CONFIG", fmt.Sprintf("Pushed Autobrr settings for %q", cfg.Trackers[idx].Name))
+	flash(w, r, trackerConfigPath(idx), "Autobrr settings pushed.", "")
 }
 
 func (h *Handler) trackerAddPage(w http.ResponseWriter, r *http.Request) {
@@ -105,13 +199,7 @@ func (h *Handler) trackerProwlarrDiffPage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	data := prowlarrDiffData{
-		TrackerIdx:      idx,
-		Tracker:         cfg.Trackers[idx],
-		ProwlarrEnabled: cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != "",
-		FlashError:      r.URL.Query().Get("err"),
-		FlashSuccess:    r.URL.Query().Get("ok"),
-		ActiveTab:       "prowlarr",
-		Section:         "tracker",
+		trackerConfigData: h.trackerConfigData(idx, cfg.Trackers[idx], cfg, r, "prowlarr"),
 	}
 	if !data.ProwlarrEnabled {
 		h.render(w, "tracker_prowlarr_diff", data)
@@ -153,7 +241,7 @@ func (h *Handler) trackerProwlarrDiffPush(w http.ResponseWriter, r *http.Request
 		flash(w, r, trackerProwlarrDiffPath(idx), "", "Save failed: "+err.Error())
 		return
 	}
-	flash(w, r, trackerProwlarrPath(idx), fmt.Sprintf("Prowlarr %s.", action), "")
+	flash(w, r, trackerConfigPath(idx), fmt.Sprintf("Prowlarr %s.", action), "")
 }
 
 func (h *Handler) trackerConfigData(idx int, t *config.TrackerEntry, cfg *config.Config, r *http.Request, tab string) trackerConfigData {
@@ -173,10 +261,68 @@ func trackerConfigPath(idx int) string {
 	return "/tracker/" + strconv.Itoa(idx) + "/config"
 }
 
-func trackerPTVConfigPath(idx int) string {
-	return trackerConfigPath(idx)
+func trackerProwlarrDiffPath(idx int) string {
+	return "/tracker/" + strconv.Itoa(idx) + "/config/prowlarr/diff"
 }
 
-func trackerProwlarrDiffPath(idx int) string {
-	return trackerProwlarrPath(idx) + "/diff"
+func (h *Handler) renderTrackerConfigWithError(w http.ResponseWriter, r *http.Request, idx int, cfg *config.Config, submittedURL, submittedKey, validationError string) {
+	data := h.buildUnifiedTrackerConfigData(idx, cfg)
+	data.SubmittedURL = submittedURL
+	data.SubmittedAPIKey = submittedKey
+	data.ValidationError = validationError
+	data.ValidationTrackerName = cfg.Trackers[idx].Name
+	h.render(w, "tracker_config_unified", data)
+}
+
+func submittedAutobrrSettings(r *http.Request, def autobrrdefs.Def) map[string]string {
+	out := make(map[string]string)
+	for _, f := range def.Settings {
+		name := "setting_" + f.Name
+		if _, ok := r.Form[name]; !ok {
+			continue
+		}
+		out[f.Name] = r.FormValue(name)
+	}
+	for _, f := range def.IRCSettings {
+		name := "setting_" + f.Name
+		if _, ok := r.Form[name]; !ok {
+			continue
+		}
+		out[f.Name] = r.FormValue(name)
+	}
+	return out
+}
+
+func (h *Handler) pushTrackerAutobrrConfig(cfg *config.Config, i int, def autobrrdefs.Def) error {
+	t := cfg.Trackers[i]
+	if t.APIKey == "" {
+		return fmt.Errorf("missing core tracker API key")
+	}
+	if t.AutobrrID == 0 {
+		return fmt.Errorf("tracker not linked to Autobrr")
+	}
+
+	settings := autobrr.WithCoreCredentials(def, t.AutobrrSettings, t.APIKey)
+	client := autobrr.New(cfg.AutobrrURL, cfg.AutobrrAPIKey, h.log)
+
+	// Fetch the existing indexer to get all its metadata
+	existing, err := client.GetIndexer(int64(t.AutobrrID))
+	if err != nil {
+		return err
+	}
+
+	// Update indexer in Autobrr with merged settings
+	updated, err := client.UpdateIndexerWithSettings(*existing, t.TrackerURL, settings)
+	if err != nil {
+		return err
+	}
+
+	// Capture and merge readback settings
+	readback := autobrr.SettingsFromPairs(updated.Settings)
+	t.AutobrrSettings = autobrr.MergeSettings(def, settings, readback)
+	now := time.Now()
+	t.AutobrrLastSync = &now
+	t.AutobrrSyncError = ""
+
+	return nil
 }
