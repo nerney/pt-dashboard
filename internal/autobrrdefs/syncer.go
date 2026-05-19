@@ -130,6 +130,28 @@ func (s *Syncer) ByIdentifier(id string) *Def {
 	return nil
 }
 
+// ByURL returns the definition whose URLs list contains trackerURL
+// (case-insensitive, trailing-slash agnostic). Used during import to match
+// a PTV tracker to its autobrr def before an AutobrrIdentifier is stored.
+// Returns nil if no def matches.
+func (s *Syncer) ByURL(trackerURL string) *Def {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	want := normalizeURL(trackerURL)
+	for i := range s.catalog {
+		for _, u := range s.catalog[i].URLs {
+			if normalizeURL(u) == want {
+				return &s.catalog[i]
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeURL(u string) string {
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(u)), "/")
+}
+
 func (s *Syncer) run(ctx context.Context) {
 	defer close(s.ready)
 	s.set(StateSyncing, "")

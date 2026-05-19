@@ -89,6 +89,13 @@ type TrackerEntry struct {
 	UserStats      *UserStats `json:"user_stats,omitempty"` // most recent stats fetch success
 	SyncError      string     `json:"sync_error,omitempty"` // error from most recent attempt
 
+	// ProwlarrSettings is the full desired config we manage in Prowlarr,
+	// keyed by field name (matches the Prowlarr schema field names). Written
+	// on every successful add or sync; read back to pre-fill the config form
+	// and to compute diffs. Never sent to the frontend — only submitted to
+	// the Prowlarr API.
+	ProwlarrSettings map[string]string `json:"prowlarr_settings,omitempty"`
+
 	// Autobrr integration — parallel structure to Prowlarr above. AutobrrID
 	// is the indexer ID inside Autobrr; AutobrrIdentifier is the autobrr
 	// definition slug ("alpharatio", etc.) used to match the per-tracker
@@ -97,6 +104,11 @@ type TrackerEntry struct {
 	AutobrrID         int    `json:"autobrr_id,omitempty"`
 	AutobrrIdentifier string `json:"autobrr_identifier,omitempty"`
 	AutobrrEnabled    bool   `json:"autobrr_enabled,omitempty"`
+
+	// AutobrrSettings is the full desired config we manage in Autobrr,
+	// keyed by field name (matches the autobrr YAML def setting names).
+	// Same write/read/security contract as ProwlarrSettings above.
+	AutobrrSettings map[string]string `json:"autobrr_settings,omitempty"`
 
 	// Branding — best-effort scrape of the tracker's landing page.
 	// Sticky once obtained; retried on each refresh until found.
