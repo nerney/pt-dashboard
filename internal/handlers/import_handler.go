@@ -94,7 +94,7 @@ func (h *Handler) importSubmit(w http.ResponseWriter, r *http.Request) {
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	urlMap, typeMap, err := h.catalogMaps()
 	if err != nil {
-		flash(w, r, pathImport, "", "Catalog unavailable: "+err.Error())
+		h.flashError(w, r, pathImport, "IMPORT", "Catalog unavailable", err)
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *Handler) importSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if len(result.imported) > 0 {
 		if err := h.store.Save(&cfg); err != nil {
-			flash(w, r, pathImport, "", "Save failed: "+err.Error())
+			h.flashError(w, r, pathImport, "CONFIG", "Save failed", err)
 			return
 		}
 	}

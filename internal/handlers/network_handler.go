@@ -63,7 +63,7 @@ func (h *Handler) networkSubmit(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.acl.Reload(cidrs, proxyHost)
 	if err != nil {
-		flash(w, r, "/config/app/network", "", "Invalid network config: "+err.Error())
+		h.flashError(w, r, "/config/app/network", "CONFIG", "Invalid network config", err)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *Handler) networkSubmit(w http.ResponseWriter, r *http.Request) {
 		ProxyHost:    proxyHost,
 	}
 	if err := h.store.SaveNetACL(saved); err != nil {
-		flash(w, r, "/config/app/network", "", "Save failed: "+err.Error())
+		h.flashError(w, r, "/config/app/network", "CONFIG", "Save failed", err)
 		return
 	}
 

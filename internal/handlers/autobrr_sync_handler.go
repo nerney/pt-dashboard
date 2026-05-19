@@ -80,7 +80,7 @@ func (h *Handler) autobrrSyncSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(synced) > 0 {
 		if err := h.store.Save(&cfg); err != nil {
-			flash(w, r, pathAutobrrSync, "", "Save failed: "+err.Error())
+			h.flashError(w, r, pathAutobrrSync, "CONFIG", "Save failed", err)
 			return
 		}
 	}

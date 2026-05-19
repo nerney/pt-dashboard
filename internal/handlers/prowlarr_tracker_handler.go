@@ -35,14 +35,14 @@ func (h *Handler) configTrackerProwlarrPost(w http.ResponseWriter, r *http.Reque
 	prowlarrCfg.Tags = submittedIntSlice(r.Form["tag"])
 	schema, err := h.prowlarrSchemaByName(cfg.Trackers[idx].DefinitionName)
 	if err != nil {
-		flash(w, r, trackerConfigPath(idx), "", "Schema unavailable — re-import from Prowlarr when available: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "PROWLARR", "Schema unavailable — re-import from Prowlarr when available", err)
 		return
 	}
 
 	submitted := submittedProwlarrSettings(r, *schema)
 	prowlarrCfg.Settings = prowlarr.MergeSettings(*schema, prowlarrCfg.Settings, submitted)
 	if err := h.store.Save(cfg); err != nil {
-		flash(w, r, trackerConfigPath(idx), "", "Save failed: "+err.Error())
+		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Save failed", err)
 		return
 	}
 

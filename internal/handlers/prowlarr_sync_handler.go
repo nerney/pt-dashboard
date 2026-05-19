@@ -187,7 +187,7 @@ func (h *Handler) prowlarrSyncSubmit(w http.ResponseWriter, r *http.Request) {
 	client := prowlarr.New(cfg.ProwlarrURL, cfg.ProwlarrAPIKey, h.log)
 	prowlarrIndexers, err := client.GetIndexers()
 	if err != nil {
-		flash(w, r, pathProwlarrSync, "", "Failed to fetch Prowlarr indexers: "+err.Error())
+		h.flashError(w, r, pathProwlarrSync, "PROWLARR", "Failed to fetch Prowlarr indexers", err)
 		return
 	}
 	byID := indexersByID(prowlarrIndexers)
@@ -195,7 +195,7 @@ func (h *Handler) prowlarrSyncSubmit(w http.ResponseWriter, r *http.Request) {
 	pushed, failures, dirty := h.runSyncPush(&cfg, client, byID, idxStrs)
 	if dirty {
 		if err := h.store.Save(&cfg); err != nil {
-			flash(w, r, pathProwlarrSync, "", "Save failed: "+err.Error())
+			h.flashError(w, r, pathProwlarrSync, "CONFIG", "Save failed", err)
 			return
 		}
 	}

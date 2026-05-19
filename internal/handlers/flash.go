@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -25,4 +26,12 @@ func flash(w http.ResponseWriter, r *http.Request, base, ok, errMsg string) {
 		target += "?" + q.Encode()
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func (h *Handler) flashError(w http.ResponseWriter, r *http.Request, path, category, userMsg string, err error) {
+	if err != nil {
+		h.log.Err(category, fmt.Sprintf("%s: %s", userMsg, err.Error()))
+		userMsg = userMsg + ": " + err.Error()
+	}
+	flash(w, r, path, "", userMsg)
 }

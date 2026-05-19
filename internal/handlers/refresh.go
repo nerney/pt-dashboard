@@ -52,7 +52,9 @@ func (h *Handler) refreshAllEntries() config.Config {
 	if changed {
 		// Persist even partial failures: SyncError + LastSync is what
 		// the UI uses to render the per-card error banner.
-		_ = h.store.Save(&cfg)
+		if err := h.store.Save(&cfg); err != nil {
+			h.log.Err("TRACKER", "refresh save failed: "+err.Error())
+		}
 	}
 	return cfg
 }
@@ -71,7 +73,9 @@ func (h *Handler) refreshOne(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.refreshOneEntry(&cfg, idx)
-	_ = h.store.Save(&cfg)
+	if err := h.store.Save(&cfg); err != nil {
+		h.log.Err("TRACKER", "refresh save failed: "+err.Error())
+	}
 	views := h.buildTrackerViews(cfg)
 	h.renderPartial(w, "tracker_card", views[idx])
 }
