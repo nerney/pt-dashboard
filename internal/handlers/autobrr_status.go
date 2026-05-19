@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strconv"
+
 	"github.com/nerney/ptv/internal/autobrr"
 	"github.com/nerney/ptv/internal/config"
 )
@@ -23,7 +25,8 @@ const (
 // unchanged.
 type trackerCardView struct {
 	*config.TrackerEntry
-	AutobrrIRCStatus string
+	AutobrrIRCStatus  string
+	ProwlarrConfigURL string
 }
 
 // buildTrackerViews wraps every configured tracker in a render view and,
@@ -34,6 +37,9 @@ func (h *Handler) buildTrackerViews(cfg config.Config) []*trackerCardView {
 	views := make([]*trackerCardView, len(cfg.Trackers))
 	for i, t := range cfg.Trackers {
 		views[i] = &trackerCardView{TrackerEntry: t}
+		if cfg.ProwlarrEnabled && cfg.ProwlarrURL != "" && cfg.ProwlarrAPIKey != "" && t.DefinitionName != "" {
+			views[i].ProwlarrConfigURL = "/config/tracker/" + strconv.Itoa(i) + "/prowlarr"
+		}
 	}
 	h.fillAutobrrIRCStatus(cfg, views)
 	return views

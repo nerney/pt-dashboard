@@ -89,6 +89,11 @@
               <span class="cmp-val">{{ .ProwlarrURL }}</span>
             </div>
           </div>
+          {{ if .SchemaError }}
+          <span class="muted">schema unavailable: {{ .SchemaError }}</span>
+          {{ else if .DiffFields }}
+          <span class="muted">fields: {{ range $i, $f := .DiffFields }}{{ if $i }}, {{ end }}{{ $f }}{{ end }}</span>
+          {{ end }}
         </label>
         {{ end }}
       </div>

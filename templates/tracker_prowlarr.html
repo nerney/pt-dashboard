@@ -1,0 +1,119 @@
+{{ define "content" }}
+<header class="site-header">
+  <div class="header-brand">
+    <a href="/" class="brand-link">
+      <span class="brand-mark">PTV</span>
+      <span class="brand-sep">—</span>
+      <span class="brand-sub">PROWLARR / {{ .Tracker.Name }}</span>
+    </a>
+  </div>
+</header>
+
+{{ template "config_nav" . }}
+{{ template "prowlarr_nav" . }}
+
+<div class="page-rule"></div>
+
+<main class="config-main">
+
+  {{ if .FlashError }}
+  <div class="alert alert-error">
+    <span class="alert-dot">●</span>{{ .FlashError }}
+  </div>
+  {{ end }}
+  {{ if .FlashSuccess }}
+  <div class="alert alert-ok">
+    <span class="alert-dot">●</span>{{ .FlashSuccess }}
+  </div>
+  {{ end }}
+
+  {{ if not .ProwlarrEnabled }}
+  <section class="config-section">
+    <h2 class="config-section-title">PROWLARR REQUIRED</h2>
+    <div class="section-rule"></div>
+    <p class="config-hint">Prowlarr is not enabled.</p>
+    <p class="config-hint"><a href="/config/prowlarr" class="link-action">→ CONFIGURE PROWLARR</a></p>
+  </section>
+  {{ else if .SchemaError }}
+  <section class="config-section">
+    <h2 class="config-section-title">SCHEMA UNAVAILABLE</h2>
+    <div class="section-rule"></div>
+    <p class="config-hint">{{ .SchemaError }}</p>
+    <p class="config-hint"><a href="/config/prowlarr/import" class="link-action">→ RE-IMPORT FROM PROWLARR</a></p>
+  </section>
+  {{ else }}
+
+  <section class="config-section">
+    <h2 class="config-section-title">
+      {{ .Tracker.Name }}<span class="muted"> — Prowlarr config</span>
+    </h2>
+    <div class="section-rule"></div>
+
+    <div class="tracker-row-meta">
+      <span class="meta-label">PROWLARR</span>
+      <span class="meta-val">
+        {{ if gt .Tracker.ProwlarrID 0 }}
+          #{{ .Tracker.ProwlarrID }} — {{ if .Tracker.Enabled }}enabled{{ else }}disabled{{ end }}
+        {{ else }}
+          not yet pushed
+        {{ end }}
+      </span>
+    </div>
+    {{ if .Tracker.ProwlarrLastSync }}
+    <div class="tracker-row-meta">
+      <span class="meta-label">LAST PUSH</span>
+      <span class="meta-val">{{ staleAge .Tracker.ProwlarrLastSync }}</span>
+    </div>
+    {{ end }}
+    {{ if .Tracker.ProwlarrSyncError }}
+    <div class="alert alert-warn">
+      <span class="alert-dot">⚠</span>{{ .Tracker.ProwlarrSyncError }}
+    </div>
+    {{ end }}
+
+    <form method="POST" action="/config/tracker/{{ .TrackerIdx }}/prowlarr" class="config-form">
+      {{ range .Fields }}
+      {{ $field := . }}
+      <div class="config-row prowlarr-field-row">
+        <div class="field">
+          <label class="field-label">{{ if .Label }}{{ .Label }}{{ else }}{{ .Name }}{{ end }}{{ if .Advanced }} <span class="muted">ADVANCED</span>{{ end }}</label>
+          {{ if .SelectOptions }}
+            <select class="field-input field-select" name="setting_{{ .Name }}">
+              {{ range .SelectOptions }}
+              <option value="{{ .Value }}" {{ if eq $field.Value .Value }}selected{{ end }}>{{ .Name }}</option>
+              {{ end }}
+            </select>
+          {{ else if eq .Type "checkbox" }}
+            <input type="hidden" name="setting_{{ .Name }}" value="false">
+            <label class="checkline">
+              <input type="checkbox" name="setting_{{ .Name }}" value="true" {{ if eq .Value "true" }}checked{{ end }}>
+              <span>{{ if .HelpText }}{{ .HelpText }}{{ else }}enabled{{ end }}</span>
+            </label>
+          {{ else if .Secret }}
+            <input class="field-input field-token" type="password" name="setting_{{ .Name }}"
+              placeholder="{{ if .HasValue }}set — enter new value to replace{{ else }}required by Prowlarr{{ end }}" autocomplete="off">
+          {{ else }}
+            <input class="field-input" type="text" name="setting_{{ .Name }}"
+              value="{{ .Value }}" placeholder="{{ .Placeholder }}" autocomplete="off">
+          {{ end }}
+          {{ if and .HelpText (ne .Type "checkbox") }}
+          <p class="config-hint">{{ .HelpText }}</p>
+          {{ end }}
+          {{ if .HelpLink }}
+          <p class="config-hint"><a href="{{ .HelpLink }}" class="link-action" rel="noreferrer">→ HELP</a></p>
+          {{ end }}
+        </div>
+      </div>
+      {{ end }}
+
+      <div class="import-submit-row">
+        <button type="submit" name="action" value="save" class="btn-sm btn-ghost">SAVE</button>
+        <button type="submit" name="action" value="save_push" class="btn-primary">SAVE + PUSH →</button>
+      </div>
+    </form>
+  </section>
+
+  {{ end }}
+
+</main>
+{{ end }}

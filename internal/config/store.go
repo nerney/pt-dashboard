@@ -94,7 +94,9 @@ type TrackerEntry struct {
 	// on every successful add or sync; read back to pre-fill the config form
 	// and to compute diffs. Never sent to the frontend — only submitted to
 	// the Prowlarr API.
-	ProwlarrSettings map[string]string `json:"prowlarr_settings,omitempty"`
+	ProwlarrSettings  map[string]string `json:"prowlarr_settings,omitempty"`
+	ProwlarrLastSync  *time.Time        `json:"prowlarr_last_sync,omitempty"`
+	ProwlarrSyncError string            `json:"prowlarr_sync_error,omitempty"`
 
 	// Autobrr integration — parallel structure to Prowlarr above. AutobrrID
 	// is the indexer ID inside Autobrr; AutobrrIdentifier is the autobrr

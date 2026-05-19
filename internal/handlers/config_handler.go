@@ -456,19 +456,19 @@ func (h *Handler) configTrackerProwlarrAdd(w http.ResponseWriter, r *http.Reques
 		flash(w, r, pathConfigTrackers, "", "Schema not found in Prowlarr: "+err.Error())
 		return
 	}
-	added, err := client.AddIndexer(*schema, entry.TrackerURL, entry.APIKey)
-	if err != nil {
+	if entry.ProwlarrSettings == nil {
+		cfg.Trackers[idx].ProwlarrSettings = prowlarr.MergeSettings(*schema, nil, nil)
+	}
+	if err := h.pushTrackerProwlarrConfig(cfg, idx, *schema); err != nil {
 		flash(w, r, pathConfigTrackers, "", "Prowlarr add failed: "+err.Error())
 		return
 	}
 
-	cfg.Trackers[idx].ProwlarrID = added.ID
-	cfg.Trackers[idx].Enabled = added.Enable
 	if err := h.store.Save(cfg); err != nil {
 		flash(w, r, pathConfigTrackers, "", "Save failed: "+err.Error())
 		return
 	}
-	h.log.Info("CONFIG", fmt.Sprintf("Added %q to Prowlarr (id=%d)", entry.Name, added.ID))
+	h.log.Info("CONFIG", fmt.Sprintf("Added %q to Prowlarr (id=%d)", entry.Name, cfg.Trackers[idx].ProwlarrID))
 	flash(w, r, pathConfigTrackers, entry.Name+" added to Prowlarr.", "")
 }
 

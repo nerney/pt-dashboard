@@ -168,6 +168,13 @@ func (h *Handler) runImport(
 			}
 			continue
 		}
+		schema, sErr := h.prowlarrSchemaByName(entry.DefinitionName)
+		if sErr != nil {
+			out.unvalidated = append(out.unvalidated, idx.Name+" (schema unavailable)")
+			h.log.Err("CONFIG", fmt.Sprintf("Prowlarr import schema failed for %q: %s", idx.Name, sErr.Error()))
+			continue
+		}
+		entry.ProwlarrSettings = prowlarr.SettingsFromFields(*schema, idx.Fields)
 
 		// Validate against the tracker API. Failure doesn't block the import —
 		// the row lands with empty stats per spec.
