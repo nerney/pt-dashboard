@@ -40,7 +40,8 @@ func (h *Handler) configTrackerProwlarrPost(w http.ResponseWriter, r *http.Reque
 	}
 
 	submitted := submittedProwlarrSettings(r, *schema)
-	prowlarrCfg.Settings = prowlarr.MergeSettings(*schema, prowlarrCfg.Settings, submitted)
+	merged := prowlarr.MergeSettings(*schema, prowlarrCfg.Settings, submitted)
+	prowlarrCfg.Settings = prowlarr.WithCoreCredentials(*schema, merged, cfg.Trackers[idx].TrackerURL, cfg.Trackers[idx].APIKey)
 	if err := h.store.Save(cfg); err != nil {
 		h.flashError(w, r, trackerConfigPath(idx), "CONFIG", "Save failed", err)
 		return

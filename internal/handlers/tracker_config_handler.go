@@ -128,7 +128,7 @@ func (h *Handler) buildUnifiedTrackerConfigData(idx int, cfg *config.Config) uni
 		}
 		if schema, err := h.prowlarrSchemaByName(t.DefinitionName); err == nil {
 			data.ProwlarrSchema = schema
-			data.ProwlarrSettingRows = prowlarrSettingRows(prowlarr.RenderFields(*schema, t.ProwlarrSettings()))
+			data.ProwlarrSettingRows = prowlarrSettingRows(prowlarr.RenderFields(*schema, prowlarr.WithCoreCredentials(*schema, t.ProwlarrSettings(), t.TrackerURL, t.APIKey)))
 		} else {
 			data.ProwlarrError = "Schema unavailable: " + err.Error()
 		}
